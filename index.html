@@ -38,15 +38,19 @@
               <div class="two-columns"><label>記録する日 <span class="required">必須</span><input name="date" id="record-date" type="date" min="1900-01-01" max="2100-12-31" required></label>
                 <label>日種別<select name="dayType"><option value="">未選択</option><option>ト</option><option>へき</option><option>きき</option></select></label></div>
               <p id="editing-note" class="help" hidden></p>
+              <div id="record-period" class="record-period" aria-live="polite"></div>
             </section>
-            <section class="card"><div class="card-heading"><span class="section-number">02</span><h2>からだの変化</h2><span class="optional">すべて任意</span></div>
+            <section class="card"><div class="card-heading"><span class="section-number">02</span><h2>当日朝の測定・疲労度</h2><span class="optional">すべて任意</span></div>
+              <p id="morning-date" class="period-note"></p>
               <div class="three-columns">
                 <label>体重<div class="unit-input"><input name="weight" type="number" inputmode="decimal" min="0.1" max="500" step="0.1" placeholder="—"><span>kg</span></div></label>
                 <label>体脂肪率<div class="unit-input"><input name="bodyFat" type="number" inputmode="decimal" min="0" max="100" step="0.1" placeholder="—"><span>%</span></div></label>
                 <label>ウエスト<div class="unit-input"><input name="waist" type="number" inputmode="decimal" min="1" max="300" step="0.1" placeholder="—"><span>cm</span></div></label>
               </div>
+              <label class="spaced-field">起床時の疲労度<select name="fatigue"><option value="">未選択</option><option value="1">1 · 元気</option><option value="2">2 · 少し疲れた</option><option value="3">3 · 普通の疲れ</option><option value="4">4 · かなり疲れた</option><option value="5">5 · とても疲れた</option></select></label>
             </section>
-            <section class="card"><div class="card-heading"><span class="section-number">03</span><h2>食事と栄養</h2></div>
+            <section class="card"><div class="card-heading"><span class="section-number">03</span><h2>前日の食事と栄養</h2></div>
+              <p id="food-date" class="period-note"></p>
               <div class="three-columns">
                 <label><span class="nutrient p">P</span> タンパク質<div class="unit-input"><input name="protein" type="number" inputmode="decimal" min="0" max="2000" step="0.1" placeholder="—"><span>g</span></div></label>
                 <label><span class="nutrient f">F</span> 脂質<div class="unit-input"><input name="fat" type="number" inputmode="decimal" min="0" max="2000" step="0.1" placeholder="—"><span>g</span></div></label>
@@ -56,16 +60,22 @@
               <p class="help">P・F・Cがすべて入力されると自動計算します。摂らなかった栄養素は「0」を入力してください。</p>
               <div class="three-columns meal-times"><label>朝食の時刻<input name="breakfast" type="time"></label><label>昼食の時刻<input name="lunch" type="time"></label><label>夕食の時刻<input name="dinner" type="time"></label></div>
             </section>
-            <section class="card"><div class="card-heading"><span class="section-number">04</span><h2>暮らしとコンディション</h2></div>
+            <section class="card"><div class="card-heading"><span class="section-number">04</span><h2>前日の活動・生活</h2></div>
+              <p id="activity-date" class="period-note"></p>
               <div class="two-columns">
-                <label>睡眠時間<div class="unit-input"><input name="sleep" type="number" inputmode="decimal" min="0" max="24" step="0.1" placeholder="—"><span>時間</span></div></label>
-                <label>疲労度<select name="fatigue"><option value="">未選択</option><option value="1">1 · 元気</option><option value="2">2 · 少し疲れた</option><option value="3">3 · 普通の疲れ</option><option value="4">4 · かなり疲れた</option><option value="5">5 · とても疲れた</option></select></label>
                 <label>筋トレ時間<div class="unit-input"><input name="strength" type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="—"><span>分</span></div></label>
                 <label>有酸素運動<input name="cardio" type="text" maxlength="200" placeholder="例：ウォーキング 20分"></label>
                 <label>アルコール<input name="alcohol" type="text" maxlength="200" placeholder="例：なし / ビール 350mL"></label>
                 <label>便通<select name="bowel"><option value="">未選択</option><option>あり</option><option>なし</option></select></label>
               </div>
-              <label class="memo-label">自由メモ<textarea name="memo" rows="4" maxlength="5000" placeholder="今日の気分や、気づいたことを。"></textarea></label>
+            </section>
+            <section class="card"><div class="card-heading"><span class="section-number">05</span><h2>前夜から当日朝の睡眠</h2></div>
+              <p id="sleep-date" class="period-note"></p>
+              <label>睡眠時間<div class="unit-input"><input name="sleep" type="number" inputmode="decimal" min="0" max="24" step="0.1" placeholder="—"><span>時間</span></div></label>
+              <p class="help">集計では、起床した当日朝の日付で扱います。</p>
+            </section>
+            <section class="card"><div class="card-heading"><span class="section-number">06</span><h2>自由メモ</h2></div>
+              <label><span class="sr-only">自由メモ</span><textarea name="memo" rows="4" maxlength="5000" placeholder="今日の気分や、気づいたことを。"></textarea></label>
             </section>
             <div class="save-bar"><p id="form-message" role="status" aria-live="polite">空欄の項目は、未記録として保存されます。</p><div class="button-row"><button id="cancel-edit" type="button" class="button secondary" hidden>編集をやめる</button><button type="submit" class="button primary" id="save-button">この日の記録を保存 <span aria-hidden="true">↗</span></button></div></div>
           </form>
@@ -76,17 +86,20 @@
         <div class="page-heading"><div><p class="eyebrow">YOUR PROGRESS</p><h1 id="overview-title">少しずつ、見えてくる。</h1><p class="subtitle">数字の変化を、長い目で振り返りましょう。</p></div></div>
         <div class="toolbar"><label>集計の基準日<input id="summary-date" type="date" min="1900-01-01" max="2100-12-31" required></label><p class="help" id="week-range"></p></div>
         <h2 class="standalone-heading">直近7日間の平均</h2><div id="summary-cards" class="summary-grid"></div>
+        <section class="card"><details><summary>食事・活動・睡眠も含めた7日平均を見る</summary><div id="weekly-summary" class="table-wrap"></div></details><p class="help">測定・疲労度・睡眠は当日朝、PFC・カロリー・筋トレは前日の実際の日付を基準に集計します。基準日の食事・活動は、翌日の記録に入力した値まで含みます。</p></section>
         <section class="card chart-card"><div class="chart-heading"><h2>からだの推移</h2><div class="chart-controls"><label><span class="sr-only">グラフの項目</span><select id="chart-metric"><option value="weight">体重 (kg)</option><option value="bodyFat">体脂肪率 (%)</option><option value="waist">ウエスト (cm)</option></select></label><label><span class="sr-only">グラフの期間</span><select id="chart-period"><option value="7">7日間</option><option value="30" selected>30日間</option><option value="90">90日間</option><option value="0">すべて</option></select></label></div></div><div id="chart-container"></div><p class="help">横軸は日付、縦軸は選んだ測定値です。未記録日は補完せず、記録のある点を線でつなぎます。</p><details id="chart-details"><summary>グラフの数値を表で見る</summary><div id="chart-table" class="table-wrap"></div></details></section>
-        <section class="card"><div class="chart-heading"><h2>月別の平均</h2><label><span class="sr-only">集計する月</span><input id="summary-month" type="month" min="1900-01" max="2100-12" required></label></div><div id="monthly-summary" class="table-wrap"></div><p class="help">各項目に入力がある日だけで平均を計算します。「0」は入力済みとして含めます。カロリーはP・F・Cがすべて入力された日だけを集計します。</p></section>
+        <section class="card"><div class="chart-heading"><h2>月別の平均</h2><label><span class="sr-only">集計する月</span><input id="summary-month" type="month" min="1900-01" max="2100-12" required></label></div><div id="monthly-summary" class="table-wrap"></div><p class="help">測定・疲労度・睡眠は当日朝、食事・活動は前日の実際の日付で集計します。たとえば11月のPFCには12月1日の記録（11月30日分）を含み、11月1日の記録（10月31日分）は含みません。</p><p class="help">各項目に入力がある日だけで平均を計算します。「0」は入力済みとして含めます。カロリーはP・F・Cがすべて入力された日だけを集計します。</p></section>
       </section>
       <section id="view-history" class="view" hidden aria-labelledby="history-title">
         <div class="page-heading"><div><p class="eyebrow">PAST NOTES</p><h1 id="history-title">これまでの記録。</h1><p class="subtitle">日付ごとに、記録の確認・修正・削除ができます。</p></div></div>
-        <div class="toolbar"><label>表示する月<input type="month" id="history-month" min="1900-01" max="2100-12"></label><button type="button" class="button secondary" id="all-history">すべての月</button><p id="history-count" class="help"></p></div>
+        <div class="toolbar"><label>表示する記録日の月<input type="month" id="history-month" min="1900-01" max="2100-12"></label><button type="button" class="button secondary" id="all-history">すべての月</button><p id="history-count" class="help"></p></div>
+        <p class="help history-help">履歴は記録日Dで並べています。食事・活動は各記録の前日分です。実際の対象日ごとの平均は「振り返る」で確認できます。</p>
         <div id="history-list"></div><button id="load-more" class="button secondary" hidden>さらに30件を表示</button>
       </section>
       <section id="view-backup" class="view" hidden aria-labelledby="backup-title">
         <div class="page-heading"><div><p class="eyebrow">KEEP YOUR NOTES</p><h1 id="backup-title">大切な記録を、手元に。</h1><p class="subtitle">機種変更や、もしものときのために。</p></div></div>
         <div class="notice"><strong>保存先は、この端末のこのブラウザです。</strong><p>端末間の自動同期はありません。ブラウザのデータ削除・端末の故障で記録が失われる場合があります。通常のタブを使い、定期的にJSONを保存してください。バックアップファイルにも健康情報が含まれます。</p></div>
+        <p class="help history-help">JSONとCSVの「日付」は記録日Dのままです。PFC・食事・活動・アルコール・便通はDの前日分、睡眠は前夜からD日朝、疲労度はD日起床時として読みます。以前のJSONもそのまま復元できます。</p>
         <div class="backup-grid"><section class="card"><span class="backup-symbol" aria-hidden="true">↓</span><h2>記録を書き出す</h2><p>JSONは、このアプリへの復元用。<br>CSVは、Excelなどで確認するための形式です。</p><p id="backup-count" class="help"></p><div class="button-row"><button class="button primary" id="export-json">JSONで保存</button><button class="button secondary" id="export-csv">CSVで保存</button></div><p class="help">iPhoneでは表示されたファイルを、共有メニューなどから「ファイルに保存」してください。ダウンロード完了まで確認しましょう。</p></section>
         <section class="card"><span class="backup-symbol" aria-hidden="true">↑</span><h2>JSONから復元する</h2><p>このアプリで保存したJSONを選んでください。<br>内容の確認後に復元します。</p><label>復元方法<select id="restore-mode"><option value="merge">今の記録に追加（同じ日付は上書き）</option><option value="replace">すべて置き換え</option></select></label><label class="file-label">JSONファイルを選ぶ<input id="restore-file" type="file" accept=".json,application/json"></label><p class="help">CSVからの復元には対応していません。復元前に、今の記録もJSONで保存することをおすすめします。</p></section></div>
         <section class="card danger-zone"><div><h2>すべての記録を削除</h2><p class="help">削除した記録は、JSONバックアップがないと戻せません。</p></div><button class="button danger-button" id="delete-all">全記録を削除</button></section>

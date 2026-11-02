@@ -72,6 +72,18 @@
     for (const key of Object.keys(K.numbers)) values[key] = values[key] === '' ? null : Number(values[key]);
     return K.validateRecord(values);
   }
+  function updateRecordDates() {
+    const date = form.elements.date.value;
+    const valid = K.validDate(date);
+    const previous = valid ? K.shiftDate(date, -1) : '';
+    $('record-period').textContent = valid
+      ? `記録日：${date}（D）／ 食事・活動の対象日：${previous}（前日）`
+      : '記録する日を選ぶと、各項目の対象日を表示します。';
+    $('morning-date').textContent = valid ? `${dateLabel(date)} 朝の測定値と起床時の状態` : '記録日当日朝の情報';
+    $('food-date').textContent = valid ? `${dateLabel(previous)} 1日分の摂取量・食事時刻` : '記録日の前日1日分';
+    $('activity-date').textContent = valid ? `${dateLabel(previous)} の運動・アルコール・便通` : '記録日の前日の情報';
+    $('sleep-date').textContent = valid ? `${dateLabel(previous)} 夜 〜 ${dateLabel(date)} 朝` : '記録日の前夜から当日朝まで';
+  }
   function updateCalories() {
     const values = {};
     for (const key of ['protein', 'fat', 'carbs']) values[key] = form.elements[key].value === '' ? null : Number(form.elements[key].value);
@@ -82,7 +94,7 @@
     editingDate = null; $('cancel-edit').hidden = true; $('editing-note').hidden = true;
     $('save-button').innerHTML = 'この日の記録を保存 <span aria-hidden="true">↗</span>';
     $('form-message').textContent = '空欄の項目は、未記録として保存されます。'; $('form-message').className = '';
-    updateCalories();
+    updateCalories(); updateRecordDates();
   }
   function editRecord(date) {
     const record = records.find(r => r.date === date);
@@ -92,7 +104,14 @@
     editingDate = date; form.elements.date.readOnly = true;
     $('cancel-edit').hidden = false; $('editing-note').hidden = false;
     $('editing-note').textContent = `${dateLabel(date)} の記録を編集中です。日付は固定です。保存するまで変更は反映されません。`;
-    $('save-button').textContent = '変更を保存'; updateCalories(); navigate('record');
+    $('save-button').textContent = '変更を保存'; updateCalories(); updateRecordDates(); navigate('record');
+  }
+  function averageTable(selectRecords, valueHeading) {
+    return `<table><thead><tr><th scope="col">項目</th><th scope="col">${valueHeading}</th><th scope="col">日付の基準</th><th scope="col">記録日数</th></tr></thead><tbody>${metrics.map(([key, label, unit]) => {
+      const result = K.mean(selectRecords(key), key);
+      const basis = K.previousDayFields.includes(key) ? '食事・活動の実施日（D−1）' : '当日朝（D）';
+      return `<tr><th scope="row">${label}</th><td>${number(result.value)} ${unit}</td><td>${basis}</td><td>${result.count}日</td></tr>`;
+    }).join('')}</tbody></table>`;
   }
   function renderOverview() {
     const end = K.validDate($('summary-date').value) ? $('summary-date').value : K.today();
@@ -103,16 +122,13 @@
       return `<div class="summary-card"><p>${label}</p><div class="summary-value">${number(result.value)}<small>${unit}</small></div><p class="help">入力 ${result.count}日分</p></div>`;
     }).join('');
     renderChart(end);
-    const month = $('summary-month').value;
-    const monthly = records.filter(r => r.date.startsWith(month));
-    $('monthly-summary').innerHTML = `<table><thead><tr><th scope="col">項目</th><th scope="col">月の平均</th><th scope="col">記録日数</th></tr></thead><tbody>${metrics.map(([key, label, unit]) => {
-      const result = K.mean(monthly, key);
-      return `<tr><th scope="row">${label}</th><td>${number(result.value)} ${unit}</td><td>${result.count}日</td></tr>`;
-    }).join('')}</tbody></table>`;
+    const month = /^\d{4}-(0[1-9]|1[0-2])$/.test($('summary-month').value) ? $('summary-month').value : end.slice(0, 7);
+    $('weekly-summary').innerHTML = averageTable(key => K.range(records, end, 7, key), '7日間の平均');
+    $('monthly-summary').innerHTML = averageTable(key => K.monthRange(records, month, key), '月の平均');
   }
   function renderChart(end) {
     const key = $('chart-metric').value, days = Number($('chart-period').value);
-    const data = K.range(records, end, days).filter(r => r[key] !== null);
+    const data = K.range(records, end, days, key).filter(r => r[key] !== null);
     const [, label, unit] = metrics.find(m => m[0] === key);
     $('chart-details').hidden = !data.length;
     if (!data.length) {
@@ -152,8 +168,9 @@
     }
     $('history-list').innerHTML = filtered.slice(0, historyLimit).map(r => {
       const detailKeys = ['protein', 'fat', 'carbs', 'sleep', 'fatigue', 'breakfast', 'lunch', 'dinner', 'strength', 'cardio', 'alcohol', 'bowel'];
-      const detail = detailKeys.map(key => `<div><dt>${K.labels[key]}</dt><dd>${escape(r[key] ?? '') || '—'}</dd></div>`).join('');
-      return `<article class="card history-card"><div class="history-top"><h2 class="history-date">${dateLabel(r.date)}${r.dayType ? `<span class="day-badge">${escape(r.dayType)}</span>` : ''}</h2><div class="button-row"><button class="button secondary" data-edit="${r.date}" aria-label="${r.date}の記録を編集">編集</button><button class="button danger-button" data-delete="${r.date}" aria-label="${r.date}の記録を削除">削除</button></div></div><div class="history-metrics">${metrics.slice(0, 4).map(([key, label, unit]) => `<div><span>${label}</span>${number(key === 'calories' ? K.calories(r) : r[key])} <small>${unit}</small></div>`).join('')}</div><details><summary>すべての項目を見る</summary><dl class="history-details">${detail}</dl><p class="history-memo">${escape(r.memo) || 'メモはありません。'}</p></details></article>`;
+      const previous = K.shiftDate(r.date, -1);
+      const detail = detailKeys.map(key => `<div><dt>${K.labels[key]}<span class="field-date">${key === 'sleep' ? `${previous}夜〜${r.date}朝` : K.targetDate(r, key) + (key === 'fatigue' ? ' 起床時' : '')}</span></dt><dd>${escape(r[key] ?? '') || '—'}</dd></div>`).join('');
+      return `<article class="card history-card"><div class="history-top"><h2 class="history-date">記録日：${dateLabel(r.date)}${r.dayType ? `<span class="day-badge">${escape(r.dayType)}</span>` : ''}</h2><div class="button-row"><button class="button secondary" data-edit="${r.date}" aria-label="${r.date}の記録を編集">編集</button><button class="button danger-button" data-delete="${r.date}" aria-label="${r.date}の記録を削除">削除</button></div></div><p class="help">当日朝の測定・疲労度：${r.date}<br>前日の食事・活動：${previous}<br>睡眠：${previous} 夜 〜 ${r.date} 朝</p><div class="history-metrics">${metrics.slice(0, 4).map(([key, label, unit]) => `<div><span>${label}（${key === 'calories' ? '前日分' : '当日朝'}）</span>${number(key === 'calories' ? K.calories(r) : r[key])} <small>${unit}</small></div>`).join('')}</div><details><summary>すべての項目を見る</summary><dl class="history-details">${detail}</dl><p class="history-memo">${escape(r.memo) || 'メモはありません。'}</p></details></article>`;
     }).join('');
   }
   function render() {
@@ -186,6 +203,8 @@
     }
   });
   form.addEventListener('input', updateCalories);
+  form.elements.date.addEventListener('input', updateRecordDates);
+  form.elements.date.addEventListener('change', updateRecordDates);
   form.addEventListener('submit', async event => {
     event.preventDefault(); if (locked || pending) return;
     let record;
@@ -194,7 +213,7 @@
     try {
       if (records.some(r => r.date === record.date) && !await confirmAction('この日の記録を上書きしますか？', `${dateLabel(record.date)} の保存済み記録を、今の入力内容で置き換えます。\n空欄にした項目も、未記録に変わります。`, '上書きして保存')) return;
       if (persist(K.mergeRecords(records, [record]))) {
-        resetForm(); form.elements.date.value = record.date; render();
+        resetForm(); form.elements.date.value = record.date; updateRecordDates(); render();
         message('form-message', `${dateLabel(record.date)} の記録を保存しました。`); toast('記録を保存しました。おつかれさまでした。');
       } else message('form-message', '保存できませんでした。入力内容は残っています。JSONで今の記録をバックアップし、保存設定や空き容量を確認してください。', true);
     } finally { pending = false; }

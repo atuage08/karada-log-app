@@ -10,6 +10,8 @@
   const texts = { cardio: 200, alcohol: 200, memo: 5000 };
   const times = ['breakfast', 'lunch', 'dinner'];
   const fields = ['date', 'dayType', ...Object.keys(numbers), ...times, ...Object.keys(texts), 'bowel'];
+  // 保存する日付は従来の記録日Dのまま。対象日は表示・集計のときだけ求めます。
+  const previousDayFields = ['protein', 'fat', 'carbs', 'calories', ...times, 'strength', 'cardio', 'alcohol', 'bowel'];
   function validDate(value) {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
     const date = new Date(value + 'T00:00:00Z');
@@ -59,9 +61,15 @@
     const values = records.map(r => field === 'calories' ? calories(r) : r[field]).filter(v => typeof v === 'number' && Number.isFinite(v));
     return { value: values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null, count: values.length };
   }
-  function range(records, end, days) {
+  function targetDate(record, field) {
+    return previousDayFields.includes(field) ? shiftDate(record.date, -1) : record.date;
+  }
+  function range(records, end, days, field = 'weight') {
     const start = days ? shiftDate(end, -(days - 1)) : '1900-01-01';
-    return records.filter(r => r.date >= start && r.date <= end).sort((a, b) => a.date.localeCompare(b.date));
+    return records.filter(r => targetDate(r, field) >= start && targetDate(r, field) <= end).sort((a, b) => a.date.localeCompare(b.date));
+  }
+  function monthRange(records, month, field) {
+    return records.filter(r => targetDate(r, field).startsWith(month)).sort((a, b) => a.date.localeCompare(b.date));
   }
   function parseBackup(text) {
     let data;
@@ -97,7 +105,7 @@
       ...[...records].sort((a, b) => a.date.localeCompare(b.date)).map(r => [...fields.map(key => r[key]), calories(r)])];
     return '\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n');
   }
-  const api = { SCHEMA_VERSION, STORAGE_KEY, numbers, texts, times, fields, labels, validDate, today, shiftDate, validateRecord, calories, mean, range, parseBackup, backup, mergeRecords, csv };
+  const api = { SCHEMA_VERSION, STORAGE_KEY, numbers, texts, times, fields, labels, validDate, today, shiftDate, targetDate, previousDayFields, validateRecord, calories, mean, range, monthRange, parseBackup, backup, mergeRecords, csv };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Karada = Object.freeze(api);
 })(globalThis);
