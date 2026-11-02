@@ -1,0 +1,51 @@
+# 個人のバックアップ・実データ
+*.json
+*.csv
+*.tsv
+*.zip
+backups/
+private/
+
+# このアプリの開発・動作確認専用ファイル（手元には残す）
+/preview.ps1
+/tests/
+/TESTING.md
+test-results/
+coverage/
+node_modules/
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+.vscode/
+.idea/
+.codex/
+.agents/
+
+# 認証情報・秘密鍵・端末固有の設定
+.env
+.env.*
+.aws/
+.ssh/
+.credentials/
+credentials/
+secrets/
+credentials.*
+secrets.*
+tokens.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+.netrc
+.npmrc
+
+# OSが自動作成するファイル
+.DS_Store
+Thumbs.db
+Desktop.ini

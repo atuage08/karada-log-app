@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#28564c">
+  <meta name="description" content="毎日のからだと暮らしを、自分のペースで記録。健康記録を端末内だけに保存する個人用アプリ。">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>からだ記録 | 自分のペースで、毎日を。</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./core.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ進む</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#record" aria-label="からだ記録 ホーム"><img src="./icon.svg" width="38" height="38" alt=""><span>からだ記録<small>わたしを知る、毎日のノート</small></span></a>
+      <span class="private-label"><span class="status-dot"></span>この端末にだけ保存</span>
+    </div>
+  </header>
+  <div class="app-shell">
+    <nav class="navigation" aria-label="メインメニュー">
+      <button class="nav-item active" data-view="record" aria-current="page"><span aria-hidden="true">＋</span>記録する</button>
+      <button class="nav-item" data-view="overview"><span aria-hidden="true">↗</span>振り返る</button>
+      <button class="nav-item" data-view="history"><span aria-hidden="true">▤</span>履歴</button>
+      <button class="nav-item" data-view="backup"><span aria-hidden="true">⇩</span>バックアップ</button>
+    </nav>
+    <main id="main">
+      <div id="storage-warning" class="notice danger" hidden role="alert"></div>
+      <noscript><p class="notice danger">このアプリにはJavaScriptが必要です。ブラウザの設定で有効にしてください。</p></noscript>
+      <section id="view-record" class="view" aria-labelledby="record-title">
+        <div class="page-heading"><div><p class="eyebrow">DAILY NOTE</p><h1 id="record-title">今日のからだを、記録しよう。</h1><p class="subtitle">ひとつの項目からで大丈夫。自分のペースで続けましょう。</p></div><span id="today-label" class="date-stamp"></span></div>
+        <div class="record-layout">
+          <form id="record-form">
+            <section class="card"><div class="card-heading"><span class="section-number">01</span><h2>日付と日種別</h2></div>
+              <div class="two-columns"><label>記録する日 <span class="required">必須</span><input name="date" id="record-date" type="date" min="1900-01-01" max="2100-12-31" required></label>
+                <label>日種別<select name="dayType"><option value="">未選択</option><option>ト</option><option>へき</option><option>きき</option></select></label></div>
+              <p id="editing-note" class="help" hidden></p>
+            </section>
+            <section class="card"><div class="card-heading"><span class="section-number">02</span><h2>からだの変化</h2><span class="optional">すべて任意</span></div>
+              <div class="three-columns">
+                <label>体重<div class="unit-input"><input name="weight" type="number" inputmode="decimal" min="0.1" max="500" step="0.1" placeholder="—"><span>kg</span></div></label>
+                <label>体脂肪率<div class="unit-input"><input name="bodyFat" type="number" inputmode="decimal" min="0" max="100" step="0.1" placeholder="—"><span>%</span></div></label>
+                <label>ウエスト<div class="unit-input"><input name="waist" type="number" inputmode="decimal" min="1" max="300" step="0.1" placeholder="—"><span>cm</span></div></label>
+              </div>
+            </section>
+            <section class="card"><div class="card-heading"><span class="section-number">03</span><h2>食事と栄養</h2></div>
+              <div class="three-columns">
+                <label><span class="nutrient p">P</span> タンパク質<div class="unit-input"><input name="protein" type="number" inputmode="decimal" min="0" max="2000" step="0.1" placeholder="—"><span>g</span></div></label>
+                <label><span class="nutrient f">F</span> 脂質<div class="unit-input"><input name="fat" type="number" inputmode="decimal" min="0" max="2000" step="0.1" placeholder="—"><span>g</span></div></label>
+                <label><span class="nutrient c">C</span> 炭水化物<div class="unit-input"><input name="carbs" type="number" inputmode="decimal" min="0" max="3000" step="0.1" placeholder="—"><span>g</span></div></label>
+              </div>
+              <div class="calorie-box"><span>摂取カロリー <small>P×4 ＋ F×9 ＋ C×4</small></span><strong><output id="calorie-output">—</output> <small>kcal</small></strong></div>
+              <p class="help">P・F・Cがすべて入力されると自動計算します。摂らなかった栄養素は「0」を入力してください。</p>
+              <div class="three-columns meal-times"><label>朝食の時刻<input name="breakfast" type="time"></label><label>昼食の時刻<input name="lunch" type="time"></label><label>夕食の時刻<input name="dinner" type="time"></label></div>
+            </section>
+            <section class="card"><div class="card-heading"><span class="section-number">04</span><h2>暮らしとコンディション</h2></div>
+              <div class="two-columns">
+                <label>睡眠時間<div class="unit-input"><input name="sleep" type="number" inputmode="decimal" min="0" max="24" step="0.1" placeholder="—"><span>時間</span></div></label>
+                <label>疲労度<select name="fatigue"><option value="">未選択</option><option value="1">1 · 元気</option><option value="2">2 · 少し疲れた</option><option value="3">3 · 普通の疲れ</option><option value="4">4 · かなり疲れた</option><option value="5">5 · とても疲れた</option></select></label>
+                <label>筋トレ時間<div class="unit-input"><input name="strength" type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="—"><span>分</span></div></label>
+                <label>有酸素運動<input name="cardio" type="text" maxlength="200" placeholder="例：ウォーキング 20分"></label>
+                <label>アルコール<input name="alcohol" type="text" maxlength="200" placeholder="例：なし / ビール 350mL"></label>
+                <label>便通<select name="bowel"><option value="">未選択</option><option>あり</option><option>なし</option></select></label>
+              </div>
+              <label class="memo-label">自由メモ<textarea name="memo" rows="4" maxlength="5000" placeholder="今日の気分や、気づいたことを。"></textarea></label>
+            </section>
+            <div class="save-bar"><p id="form-message" role="status" aria-live="polite">空欄の項目は、未記録として保存されます。</p><div class="button-row"><button id="cancel-edit" type="button" class="button secondary" hidden>編集をやめる</button><button type="submit" class="button primary" id="save-button">この日の記録を保存 <span aria-hidden="true">↗</span></button></div></div>
+          </form>
+          <aside class="record-aside"><div class="gentle-card"><div class="plant-art" aria-hidden="true"><svg viewBox="0 0 180 145"><path d="M89 130V44M89 96Q44 96 39 52Q83 50 89 96M89 73Q130 72 143 23Q94 24 89 73M89 121Q120 121 131 88Q96 88 89 121" fill="#bed0ba" stroke="#54765f" stroke-width="3" stroke-linecap="round"/><path d="M62 132H118" stroke="#54765f" stroke-width="3" stroke-linecap="round"/></svg></div><p class="eyebrow">LITTLE BY LITTLE</p><h2>小さな記録が、<br>自分を知るきっかけに。</h2><p>毎日すべてを埋めなくても大丈夫。<br>できる日、できることから。</p></div><div class="aside-note"><span class="status-dot"></span><div><strong>あなたの記録は、あなたの手元に。</strong><p>記録はこのブラウザ内に保存します。大切な記録は、定期的にJSONでバックアップしましょう。</p><button class="text-button" data-go="backup">バックアップについて →</button></div></div></aside>
+        </div>
+      </section>
+      <section id="view-overview" class="view" hidden aria-labelledby="overview-title">
+        <div class="page-heading"><div><p class="eyebrow">YOUR PROGRESS</p><h1 id="overview-title">少しずつ、見えてくる。</h1><p class="subtitle">数字の変化を、長い目で振り返りましょう。</p></div></div>
+        <div class="toolbar"><label>集計の基準日<input id="summary-date" type="date" min="1900-01-01" max="2100-12-31" required></label><p class="help" id="week-range"></p></div>
+        <h2 class="standalone-heading">直近7日間の平均</h2><div id="summary-cards" class="summary-grid"></div>
+        <section class="card chart-card"><div class="chart-heading"><h2>からだの推移</h2><div class="chart-controls"><label><span class="sr-only">グラフの項目</span><select id="chart-metric"><option value="weight">体重 (kg)</option><option value="bodyFat">体脂肪率 (%)</option><option value="waist">ウエスト (cm)</option></select></label><label><span class="sr-only">グラフの期間</span><select id="chart-period"><option value="7">7日間</option><option value="30" selected>30日間</option><option value="90">90日間</option><option value="0">すべて</option></select></label></div></div><div id="chart-container"></div><p class="help">横軸は日付、縦軸は選んだ測定値です。未記録日は補完せず、記録のある点を線でつなぎます。</p><details id="chart-details"><summary>グラフの数値を表で見る</summary><div id="chart-table" class="table-wrap"></div></details></section>
+        <section class="card"><div class="chart-heading"><h2>月別の平均</h2><label><span class="sr-only">集計する月</span><input id="summary-month" type="month" min="1900-01" max="2100-12" required></label></div><div id="monthly-summary" class="table-wrap"></div><p class="help">各項目に入力がある日だけで平均を計算します。「0」は入力済みとして含めます。カロリーはP・F・Cがすべて入力された日だけを集計します。</p></section>
+      </section>
+      <section id="view-history" class="view" hidden aria-labelledby="history-title">
+        <div class="page-heading"><div><p class="eyebrow">PAST NOTES</p><h1 id="history-title">これまでの記録。</h1><p class="subtitle">日付ごとに、記録の確認・修正・削除ができます。</p></div></div>
+        <div class="toolbar"><label>表示する月<input type="month" id="history-month" min="1900-01" max="2100-12"></label><button type="button" class="button secondary" id="all-history">すべての月</button><p id="history-count" class="help"></p></div>
+        <div id="history-list"></div><button id="load-more" class="button secondary" hidden>さらに30件を表示</button>
+      </section>
+      <section id="view-backup" class="view" hidden aria-labelledby="backup-title">
+        <div class="page-heading"><div><p class="eyebrow">KEEP YOUR NOTES</p><h1 id="backup-title">大切な記録を、手元に。</h1><p class="subtitle">機種変更や、もしものときのために。</p></div></div>
+        <div class="notice"><strong>保存先は、この端末のこのブラウザです。</strong><p>端末間の自動同期はありません。ブラウザのデータ削除・端末の故障で記録が失われる場合があります。通常のタブを使い、定期的にJSONを保存してください。バックアップファイルにも健康情報が含まれます。</p></div>
+        <div class="backup-grid"><section class="card"><span class="backup-symbol" aria-hidden="true">↓</span><h2>記録を書き出す</h2><p>JSONは、このアプリへの復元用。<br>CSVは、Excelなどで確認するための形式です。</p><p id="backup-count" class="help"></p><div class="button-row"><button class="button primary" id="export-json">JSONで保存</button><button class="button secondary" id="export-csv">CSVで保存</button></div><p class="help">iPhoneでは表示されたファイルを、共有メニューなどから「ファイルに保存」してください。ダウンロード完了まで確認しましょう。</p></section>
+        <section class="card"><span class="backup-symbol" aria-hidden="true">↑</span><h2>JSONから復元する</h2><p>このアプリで保存したJSONを選んでください。<br>内容の確認後に復元します。</p><label>復元方法<select id="restore-mode"><option value="merge">今の記録に追加（同じ日付は上書き）</option><option value="replace">すべて置き換え</option></select></label><label class="file-label">JSONファイルを選ぶ<input id="restore-file" type="file" accept=".json,application/json"></label><p class="help">CSVからの復元には対応していません。復元前に、今の記録もJSONで保存することをおすすめします。</p></section></div>
+        <section class="card danger-zone"><div><h2>すべての記録を削除</h2><p class="help">削除した記録は、JSONバックアップがないと戻せません。</p></div><button class="button danger-button" id="delete-all">全記録を削除</button></section>
+        <p id="backup-message" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+    <footer class="site-footer"><span>からだ記録</span><span>自分のペースで、毎日を。</span></footer>
+  </div>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-description"><form method="dialog"><p class="eyebrow">PLEASE CONFIRM</p><h2 id="confirm-title"></h2><p id="confirm-description"></p><div class="button-row"><button class="button secondary" value="cancel" autofocus>やめる</button><button class="button primary" id="confirm-accept" value="accept">実行する</button></div></form></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
