@@ -14,6 +14,8 @@
   <link rel="apple-touch-icon" href="./apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="./style.css">
   <script src="./core.js" defer></script>
+  <script src="./analysis.js" defer></script>
+  <script src="./analysis-ui.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
@@ -33,6 +35,7 @@
     </nav>
     <main id="main">
       <div id="storage-warning" class="notice danger" hidden role="alert"></div>
+      <div id="migration-warning" class="notice" hidden role="status"></div>
       <noscript><p class="notice danger">このアプリにはJavaScriptが必要です。ブラウザの設定で有効にしてください。</p></noscript>
       <section id="view-record" class="view" aria-labelledby="record-title">
         <div class="page-heading"><div><p class="eyebrow">DAILY NOTE</p><h1 id="record-title">今日のからだを、記録しよう。</h1><p class="subtitle">ひとつの項目からで大丈夫。自分のペースで続けましょう。</p></div><span id="today-label" class="date-stamp"></span></div>
@@ -40,7 +43,7 @@
           <form id="record-form">
             <section class="card"><div class="card-heading"><span class="section-number">01</span><h2>日付と日種別</h2></div>
               <div class="two-columns"><label>記録する日 <span class="required">必須</span><input name="date" id="record-date" type="date" min="1900-01-01" max="2100-12-31" required></label>
-                <label>日種別<select name="dayType"><option value="">未選択</option><option>ト</option><option>へき</option><option>きき</option></select></label></div>
+                <label>前日の日種別<select name="dayType"><option value="">未選択</option><option>ト</option><option>へき</option><option>きき</option></select></label></div>
               <p id="editing-note" class="help" hidden></p>
               <div id="record-period" class="record-period" aria-live="polite"></div>
             </section>
@@ -62,16 +65,17 @@
               </div>
               <div class="calorie-box"><span>摂取カロリー <small>P×4 ＋ F×9 ＋ C×4</small></span><strong><output id="calorie-output">—</output> <small>kcal</small></strong></div>
               <p class="help">P・F・Cがすべて入力されると自動計算します。摂らなかった栄養素は「0」を入力してください。</p>
-              <div class="three-columns meal-times"><label>朝食の時刻<input name="breakfast" type="time"></label><label>昼食の時刻<input name="lunch" type="time"></label><label>夕食の時刻<input name="dinner" type="time"></label></div>
             </section>
             <section class="card"><div class="card-heading"><span class="section-number">04</span><h2>前日の活動・生活</h2></div>
               <p id="activity-date" class="period-note"></p>
               <div class="two-columns">
                 <label>筋トレ時間<div class="unit-input"><input name="strength" type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="—"><span>分</span></div></label>
-                <label>有酸素運動<input name="cardio" type="text" maxlength="200" placeholder="例：ウォーキング 20分"></label>
+                <label>有酸素運動<div class="unit-input"><input name="cardio" type="number" inputmode="numeric" min="0" step="1" placeholder="空欄なら0"><span>分</span></div></label>
                 <label>アルコール<input name="alcohol" type="text" maxlength="200" placeholder="例：なし / ビール 350mL"></label>
                 <label>便通<select name="bowel"><option value="">未選択</option><option>あり</option><option>なし</option></select></label>
               </div>
+              <p class="help">筋トレ・有酸素は0以上の整数（分）で入力します。新規記録の空欄は0分です。記録のない日は未記録として扱います。運動の種類は自由メモに書けます。</p>
+              <p id="exercise-edit-note" class="help" hidden>旧記録の時間未確定欄は、空欄のまま変更を保存すると0分になります。元の内容は自由メモで確認してください。</p>
             </section>
             <section class="card"><div class="card-heading"><span class="section-number">05</span><h2>前夜から当日朝の睡眠</h2></div>
               <p id="sleep-date" class="period-note"></p>
@@ -90,7 +94,9 @@
         <div class="page-heading"><div><p class="eyebrow">YOUR PROGRESS</p><h1 id="overview-title">少しずつ、見えてくる。</h1><p class="subtitle">数字の変化を、長い目で振り返りましょう。</p></div></div>
         <div class="toolbar"><label>集計の基準日<input id="summary-date" type="date" min="1900-01-01" max="2100-12-31" required></label><p class="help" id="week-range"></p></div>
         <h2 class="standalone-heading">直近7日間の平均</h2><div id="summary-cards" class="summary-grid"></div>
-        <section class="card"><details><summary>食事・活動・睡眠も含めた7日平均を見る</summary><div id="weekly-summary" class="table-wrap"></div></details><p class="help">測定・疲労度・睡眠は当日朝、PFC・カロリー・筋トレは前日の実際の日付を基準に集計します。基準日の食事・活動は、翌日の記録に入力した値まで含みます。</p></section>
+        <section class="card"><details><summary>食事・活動・睡眠も含めた7日平均を見る</summary><div id="weekly-summary" class="table-wrap"></div></details><p class="help">この7日平均は選択した基準日をDとし、身体・睡眠・疲労度はDまで、食事・運動はD−1までを集計します。下の期間比較・週次分析は保存済み最新記録日が基準です。</p></section>
+        <section class="card" aria-labelledby="analysis-title"><div class="chart-heading"><h2 id="analysis-title">期間比較・週次分析</h2><button class="button secondary" id="copy-analysis" type="button" disabled>ChatGPT分析用データをコピー</button></div><p id="analysis-anchor" class="help"></p><p class="help">コピーは端末内で行います。ChatGPTに自動送信しません。自由メモは含みません。貼り付け前に内容をご確認ください。横に長い表は表の中でスクロールできます。</p><p id="copy-message" role="status"></p><div id="copy-fallback" hidden><label>手動コピー用テキスト<textarea id="analysis-copy-text" rows="12" readonly></textarea></label><button id="select-analysis" class="button secondary" type="button">テキストを選択</button></div><div id="period-comparisons"></div><details><summary>完了した直近8週間と今週の途中経過</summary><div id="week-analysis"></div></details></section>
+        <section class="card" aria-labelledby="goals-title"><h2 id="goals-title">PFC目標と変更履歴</h2><p class="help">適用開始日は食事実施日（D−1）です。それ以前の期間には初期目標を使います。変更は新しい適用開始日の設定を追加して残します。</p><div id="target-history" class="table-wrap"></div><details><summary>目標を変更する</summary><form id="target-form"><label>適用開始日（食事実施日）<input id="target-date" type="date" min="1900-01-01" max="2100-12-31" required></label><button class="text-button" id="load-targets" type="button">この日に適用中の目標を読み込む</button><div id="target-fields"></div><button class="button primary" type="submit">確認して目標履歴に追加</button><p id="target-message" role="status"></p></form></details></section>
         <section class="card chart-card"><div class="chart-heading"><h2>からだの推移</h2><div class="chart-controls"><label><span class="sr-only">グラフの項目</span><select id="chart-metric"><option value="weight">体重 (kg)</option><option value="bodyFat">体脂肪率 (%)</option><option value="waist">ウエスト (cm)</option></select></label><label><span class="sr-only">グラフの期間</span><select id="chart-period"><option value="7">7日間</option><option value="30" selected>30日間</option><option value="90">90日間</option><option value="0">すべて</option></select></label></div></div><div id="chart-container"></div><p class="help">横軸は日付、縦軸は選んだ測定値です。未記録日は補完せず、記録のある点を線でつなぎます。</p><details id="chart-details"><summary>グラフの数値を表で見る</summary><div id="chart-table" class="table-wrap"></div></details></section>
         <section class="card"><div class="chart-heading"><h2>月別の平均</h2><label><span class="sr-only">集計する月</span><input id="summary-month" type="month" min="1900-01" max="2100-12" required></label></div><div id="monthly-summary" class="table-wrap"></div><p class="help">測定・疲労度・睡眠は当日朝、食事・活動は前日の実際の日付で集計します。たとえば11月のPFCには12月1日の記録（11月30日分）を含み、11月1日の記録（10月31日分）は含みません。</p><p class="help">各項目に入力がある日だけで平均を計算します。「0」は入力済みとして含めます。カロリーはP・F・Cがすべて入力された日だけを集計します。</p></section>
       </section>
@@ -103,9 +109,9 @@
       <section id="view-backup" class="view" hidden aria-labelledby="backup-title">
         <div class="page-heading"><div><p class="eyebrow">KEEP YOUR NOTES</p><h1 id="backup-title">大切な記録を、手元に。</h1><p class="subtitle">機種変更や、もしものときのために。</p></div></div>
         <div class="notice"><strong>保存先は、この端末のこのブラウザです。</strong><p>端末間の自動同期はありません。ブラウザのデータ削除・端末の故障で記録が失われる場合があります。通常のタブを使い、定期的にJSONを保存してください。バックアップファイルにも健康情報が含まれます。</p></div>
-        <p class="help history-help">JSONとCSVの「日付」は記録日Dのままです。PFC・食事・活動・アルコール・便通はDの前日分、睡眠は前夜からD日朝、疲労度はD日起床時として読みます。以前のJSONもそのまま復元できます。</p>
+        <p class="help history-help">JSONは形式2で記録とPFC目標履歴を保存します。形式1も読み込めます。旧食事時刻は取り込まず、旧有酸素の文字列は推測せずメモに残し、時間未確定とします。日種別・食事・活動の対象日はD−1です。</p>
         <div class="backup-grid"><section class="card"><span class="backup-symbol" aria-hidden="true">↓</span><h2>記録を書き出す</h2><p>JSONは、このアプリへの復元用。<br>CSVは、Excelなどで確認するための形式です。</p><p id="backup-count" class="help"></p><div class="button-row"><button class="button primary" id="export-json">JSONで保存</button><button class="button secondary" id="export-csv">CSVで保存</button></div><p class="help">iPhoneでは表示されたファイルを、共有メニューなどから「ファイルに保存」してください。ダウンロード完了まで確認しましょう。</p></section>
-        <section class="card"><span class="backup-symbol" aria-hidden="true">↑</span><h2>JSONから復元する</h2><p>このアプリで保存したJSONを選んでください。<br>内容の確認後に復元します。</p><label>復元方法<select id="restore-mode"><option value="merge">今の記録に追加（同じ日付は上書き）</option><option value="replace">すべて置き換え</option></select></label><label class="file-label">JSONファイルを選ぶ<input id="restore-file" type="file" accept=".json,application/json"></label><p class="help">CSVからの復元には対応していません。復元前に、今の記録もJSONで保存することをおすすめします。</p></section></div>
+        <section class="card"><span class="backup-symbol" aria-hidden="true">↑</span><h2>JSONから復元する</h2><p>このアプリで保存したJSONを選んでください。<br>内容の確認後に復元します。</p><label>記録の復元方法<select id="restore-mode"><option value="merge">今の記録に追加（同じ日付は上書き）</option><option value="replace">記録をすべて置き換え</option></select></label><label class="spaced-field">PFC目標履歴<select id="restore-target-mode"><option value="keep">現在の目標履歴を保持する</option><option value="merge">追加する（適用開始日の重複は拒否）</option><option value="replace">ファイルの目標履歴に置き換える</option></select></label><label class="file-label">JSONファイルを選ぶ<input id="restore-file" type="file" accept=".json,application/json"></label><p class="help">目標履歴は標準では変更しません。旧形式のファイルには目標履歴がありません。CSVからの復元には対応していません。</p></section></div>
         <section class="card danger-zone"><div><h2>すべての記録を削除</h2><p class="help">削除した記録は、JSONバックアップがないと戻せません。</p></div><button class="button danger-button" id="delete-all">全記録を削除</button></section>
         <p id="backup-message" role="status" aria-live="polite"></p>
       </section>
