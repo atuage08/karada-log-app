@@ -1,1 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="20" fill="#28564c"/><path d="M31 49V27c-11 0-17-7-17-17 12 0 19 6 19 17 0-13 8-20 20-20 0 14-7 23-20 23v19" fill="#d1debd"/><path d="M22 49h20" stroke="#d1debd" stroke-width="3" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="からだ記録 カレンダーとチェック">
+  <rect width="1024" height="1024" fill="#2E7D5A"/>
+  <path fill="#FFFFFF" d="M249 218h524c49 0 88 39 88 88v428c0 58-47 105-105 105H268c-58 0-105-47-105-105V304c0-47 39-86 86-86z"/>
+  <rect x="225" y="367" width="574" height="406" rx="32" fill="#2E7D5A"/>
+  <rect x="326" y="139" width="80" height="183" rx="40" fill="#FFFFFF"/>
+  <rect x="618" y="139" width="80" height="183" rx="40" fill="#FFFFFF"/>
+  <g fill="#FFFFFF">
+    <rect x="292" y="436" width="96" height="96" rx="19"/>
+    <rect x="452" y="436" width="96" height="96" rx="19"/>
+    <rect x="612" y="436" width="96" height="96" rx="19"/>
+    <rect x="292" y="600" width="96" height="96" rx="19"/>
+    <rect x="452" y="600" width="96" height="96" rx="19"/>
+  </g>
+  <circle cx="753" cy="720" r="174" fill="#FFFFFF"/>
+  <circle cx="753" cy="720" r="129" fill="#2E7D5A"/>
+  <path d="M671 725l58 56 120-130" fill="none" stroke="#FFFFFF" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
