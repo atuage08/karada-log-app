@@ -8,7 +8,15 @@ private/
 
 # このアプリの開発・動作確認専用ファイル（手元には残す）
 /preview.ps1
-/tests/
+# 確認済みの架空データ自動テストだけをGit管理対象にする
+/tests/*
+!/tests/core.test.cjs
+!/tests/analysis.test.cjs
+!/tests/app-startup.test.cjs
+!/tests/copy.test.cjs
+!/tests/analysis-text.test.cjs
+!/tests/security-codeql.test.cjs
+!/tests/usability.test.cjs
 /TESTING.md
 test-results/
 coverage/

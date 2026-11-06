@@ -11,6 +11,9 @@
   let records = [], locked = false, editingDate = null, historyLimit = 30, toastTimer;
   let pending = false;
   let targetHistory = [], migrationWarnings = [];
+  const backupTimeKey = 'karada-log.backup.last-json-export.v1';
+  let editingRecord = null, editTimeValues = null, editNumberValues = null;
+  const decimalFields = ['weight', 'bodyFat', 'waist', 'protein', 'fat', 'carbs'];
   const number = value => value == null ? '—' : value.toLocaleString('ja-JP', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
   const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const shortDate = value => `${Number(value.slice(5, 7))}/${Number(value.slice(8, 10))}`;
@@ -19,11 +22,12 @@
   }
   function message(id, text, error = false) { $(id).textContent = text; $(id).className = error ? 'error' : 'success'; }
   function toast(text) { clearTimeout(toastTimer); $('toast').textContent = text; $('toast').hidden = false; toastTimer = setTimeout(() => { $('toast').hidden = true; }, 4500); }
-  async function confirmAction(title, description, accept, danger = false) {
+  async function confirmAction(title, description, accept, danger = false, cancel = 'やめる') {
     const dialog = $('confirm-dialog');
     $('confirm-title').textContent = title;
     $('confirm-description').textContent = description;
     $('confirm-accept').textContent = accept;
+    $('confirm-cancel').textContent = cancel;
     $('confirm-accept').className = 'button ' + (danger ? 'danger-button' : 'primary');
     dialog.returnValue = 'cancel';
     return new Promise(resolve => {
@@ -70,8 +74,60 @@
   function navigate(view) { if (location.hash === '#' + view) switchView(view); else location.hash = view; }
   function formRecord() {
     const values = Object.fromEntries(new FormData(form));
-    for (const key of Object.keys(K.numbers)) values[key] = values[key] === '' ? null : Number(values[key]);
-    return K.validateRecord(values);
+    // disabledの旧アルコール欄も、保存値を保持する判断に使います。
+    values.alcohol = form.elements.alcohol.value;
+    for (const control of Object.values(form.elements)) {
+      if (control.validity?.badInput) throw new Error('数値の形式が正しくありません。入力内容を確認してください。');
+    }
+    const timeValue = (prefix, sleep = false) => {
+      const hour = form.elements[prefix + 'Hours'].value, minute = form.elements[prefix + 'Minutes'].value;
+      if (sleep && editingRecord && editingRecord.sleep != null && editingRecord.sleep < 1 && $('clear-legacy-sleep').checked) return null;
+      if (editingRecord && editTimeValues[prefix] === JSON.stringify([hour, minute])) return editingRecord[prefix];
+      if (hour === '' && minute === '') return sleep ? null : 0;
+      const integer = (value, min, max) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= min && Number(value) <= max;
+      if ((hour !== '' && !integer(hour, sleep ? 1 : 0, sleep ? 24 : Math.floor(Number.MAX_SAFE_INTEGER / 60))) || (minute !== '' && !integer(minute, 0, 59)) || (sleep && hour === '')) throw new Error(`${sleep ? '睡眠' : '筋トレ'}時間の形式が正しくありません。時間と分は整数、分は0〜59で入力してください。`);
+      const total = Number(hour || 0) * 60 + Number(minute || 0);
+      if (!Number.isSafeInteger(total) || (sleep && total > 1440)) throw new Error('時間が範囲外です。睡眠は24時間以内で入力してください。');
+      return sleep ? total / 60 : total;
+    };
+    const strength = timeValue('strength'), sleep = timeValue('sleep', true);
+    for (const key of ['strengthHours', 'strengthMinutes', 'sleepHours', 'sleepMinutes']) delete values[key];
+    // 初期値「なし」と運動の自動0だけで空の記録ができることを防ぎます。
+    const explicitInput = Object.entries(values).some(([key, value]) => !['date', 'alcohol'].includes(key) && (key === 'memo' ? value.trim() !== '' : value !== '')) || values.alcohol === 'あり' || ['strengthHours', 'strengthMinutes', 'sleepHours', 'sleepMinutes'].some(key => form.elements[key].value !== '');
+    if (!editingRecord && !explicitInput) throw new Error('日付と初期値以外に、少なくとも1項目を入力してください。');
+    if (!['なし', 'あり'].includes(values.alcohol)) throw new Error('アルコールは「なし」「あり」から選んでください。');
+    if (editingRecord && !['なし', 'あり'].includes(editingRecord.alcohol) && !$('replace-alcohol').checked) values.alcohol = editingRecord.alcohol;
+    for (const key of Object.keys(K.numbers)) if (!['strength', 'sleep'].includes(key)) {
+      const raw = values[key];
+      if (decimalFields.includes(key) && editingRecord && raw === editNumberValues[key]) {
+        values[key] = editingRecord[key];
+        continue;
+      }
+      values[key] = raw === '' ? null : Number(raw);
+      // 0.1の浮動小数表現を許容しつつ、端数を丸めて保存しない。
+      if (decimalFields.includes(key) && values[key] != null && values[key] !== Math.round(values[key] * 10) / 10) throw new Error(`${K.labels[key]} は0.1刻みで入力してください。`);
+    }
+    values.strength = strength; values.sleep = sleep;
+    if (editingRecord && editingRecord.cardio == null && form.elements.cardio.value === '') values.cardio = null;
+    const result = K.validateRecord(values, { preserveUnknownExercise: true });
+    // 新規の有酸素空欄だけは従来どおり0分。旧未確定値は編集で保持。
+    if (!editingRecord || editingRecord.cardio != null) result.cardio ??= 0;
+    return result;
+  }
+  function renderBackupReminder() {
+    let timestamp = NaN;
+    try {
+      const raw = localStorage.getItem(backupTimeKey);
+      if (raw && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(raw)) {
+        const parsed = Date.parse(raw);
+        if (Number.isFinite(parsed) && new Date(parsed).toISOString() === raw) timestamp = parsed;
+      }
+    } catch { /* 記録保存の可否とは独立して扱います。 */ }
+    const now = Date.now(), known = Number.isFinite(timestamp) && timestamp <= now;
+    $('backup-reminder').hidden = known && now - timestamp < 7 * 86400000;
+    $('backup-reminder-text').textContent = known
+      ? '最後のJSON書き出し操作から7日以上経過しました。バックアップをおすすめします。書き出し操作の記録であり、ファイルの保管完了は保証しません。'
+      : '最後のJSON書き出し操作の日時が不明です。バックアップをおすすめします。ファイルが実際に保管されたこともご確認ください。';
   }
   function updateRecordDates() {
     const date = form.elements.date.value;
@@ -92,7 +148,11 @@
   }
   function resetForm() {
     form.reset(); form.elements.date.value = K.today(); form.elements.date.readOnly = false;
-    editingDate = null; $('cancel-edit').hidden = true; $('editing-note').hidden = true;
+    editingDate = null; editingRecord = null; editTimeValues = null; editNumberValues = null;
+    $('legacy-sleep-choice').hidden = true; $('clear-legacy-sleep').checked = false;
+    form.elements.alcohol.value = 'なし'; form.elements.alcohol.disabled = false;
+    $('legacy-alcohol').hidden = true; $('replace-alcohol').checked = false; $('sleep-edit-note').hidden = true;
+    $('cancel-edit').hidden = true; $('editing-note').hidden = true;
     $('exercise-edit-note').hidden = true;
     $('save-button').innerHTML = 'この日の記録を保存 <span aria-hidden="true">↗</span>';
     $('form-message').textContent = '空欄の項目は、未記録として保存されます。'; $('form-message').className = '';
@@ -102,7 +162,24 @@
     const record = records.find(r => r.date === date);
     if (!record) return;
     resetForm();
-    for (const key of K.fields) form.elements[key].value = record[key] ?? '';
+    for (const key of K.fields) if (!['strength', 'sleep'].includes(key)) form.elements[key].value = record[key] ?? '';
+    editingRecord = record;
+    editNumberValues = Object.fromEntries(decimalFields.map(key => [key, form.elements[key].value]));
+    editTimeValues = {};
+    for (const prefix of ['strength', 'sleep']) {
+      const value = record[prefix], minutes = value == null ? null : Math.round(value * (prefix === 'sleep' ? 60 : 1));
+      const display = minutes != null && (prefix !== 'sleep' || value >= 1) ? [String(Math.floor(minutes / 60)), String(minutes % 60)] : ['', ''];
+      form.elements[prefix + 'Hours'].value = display[0]; form.elements[prefix + 'Minutes'].value = display[1];
+      editTimeValues[prefix] = JSON.stringify(display);
+    }
+    $('sleep-edit-note').hidden = record.sleep == null;
+    $('sleep-edit-note').textContent = `保存済みの睡眠（最も近い1分で表示）：${window.KaradaAnalysisUI.formatSleep(record.sleep)}。時間欄・分欄の両方を変更しない場合は元の値を保持します。どちらかを変更した場合は1〜24時間の新ルールを適用します。`;
+    $('legacy-sleep-choice').hidden = record.sleep == null || record.sleep >= 1;
+    if (!['なし', 'あり'].includes(record.alcohol)) {
+      $('legacy-alcohol').hidden = false;
+      $('legacy-alcohol-value').textContent = `旧記録：${record.alcohol || '未記録'}。チェックしない限り、そのまま保持します。`;
+      form.elements.alcohol.value = 'なし'; form.elements.alcohol.disabled = true;
+    }
     editingDate = date; form.elements.date.readOnly = true;
     $('exercise-edit-note').hidden = record.cardio != null && record.strength != null;
     $('cancel-edit').hidden = false; $('editing-note').hidden = false;
@@ -113,7 +190,7 @@
     return `<table><thead><tr><th scope="col">項目</th><th scope="col">${valueHeading}</th><th scope="col">日付の基準</th><th scope="col">記録日数</th><th scope="col">記録状況</th></tr></thead><tbody>${metrics.map(([key, label, unit]) => {
       const result = K.mean(selectRecords(key), key);
       const basis = K.previousDayFields.includes(key) ? '食事・活動の実施日（D−1）' : '当日朝（D）';
-      return `<tr><th scope="row">${label}</th><td>${result.count ? number(result.value) : 'データなし'} ${unit}</td><td>${basis}</td><td>${result.count}日／${expected}日</td><td>${window.KaradaAnalysis.quality(result.count, expected)}</td></tr>`;
+      return `<tr><th scope="row">${label}</th><td>${key === 'sleep' ? window.KaradaAnalysisUI.formatSleep(result.value) : (result.count ? number(result.value) : 'データなし') + ' ' + unit}</td><td>${basis}</td><td>${result.count}日／${expected}日</td><td>${window.KaradaAnalysis.quality(result.count, expected)}</td></tr>`;
     }).join('')}</tbody></table>`;
   }
   function renderOverview() {
@@ -185,7 +262,7 @@
     $('history-list').innerHTML = filtered.slice(0, historyLimit).map(r => {
       const detailKeys = ['protein', 'fat', 'carbs', 'sleep', 'fatigue', 'strength', 'cardio', 'alcohol', 'bowel'];
       const previous = K.shiftDate(r.date, -1);
-      const detail = detailKeys.map(key => `<div><dt>${K.labels[key]}<span class="field-date">${key === 'sleep' ? `${previous}夜〜${r.date}朝` : K.targetDate(r, key) + (key === 'fatigue' ? ' 起床時' : '')}</span></dt><dd>${r[key] == null && ['cardio', 'strength'].includes(key) ? '時間未確定（集計対象外）' : escape(r[key] ?? '') || '—'}</dd></div>`).join('');
+      const detail = detailKeys.map(key => `<div><dt>${key === 'sleep' ? '睡眠時間' : K.labels[key]}<span class="field-date">${key === 'sleep' ? `${previous}夜〜${r.date}朝` : K.targetDate(r, key) + (key === 'fatigue' ? ' 起床時' : '')}</span></dt><dd>${key === 'sleep' ? window.KaradaAnalysisUI.formatSleep(r[key]) : r[key] == null && ['cardio', 'strength'].includes(key) ? '時間未確定（集計対象外）' : escape(r[key] ?? '') || '—'}</dd></div>`).join('');
       return `<article class="card history-card"><div class="history-top"><h2 class="history-date">記録日：${dateLabel(r.date)}${r.dayType ? `<span class="day-badge">${escape(r.dayType)}</span>` : ''}</h2><div class="button-row"><button class="button secondary" data-edit="${r.date}" aria-label="${r.date}の記録を編集">編集</button><button class="button danger-button" data-delete="${r.date}" aria-label="${r.date}の記録を削除">削除</button></div></div><p class="help">当日朝の測定・疲労度：${r.date}<br>前日の食事・活動：${previous}<br>睡眠：${previous} 夜 〜 ${r.date} 朝</p><div class="history-metrics">${metrics.slice(0, 4).map(([key, label, unit]) => `<div><span>${label}（${key === 'calories' ? '前日分' : '当日朝'}）</span>${number(key === 'calories' ? K.calories(r) : r[key])} <small>${unit}</small></div>`).join('')}</div><details><summary>すべての項目を見る</summary><dl class="history-details">${detail}</dl><p class="history-memo">${escape(r.memo) || 'メモはありません。'}</p></details></article>`;
     }).join('');
   }
@@ -199,6 +276,7 @@
     $('delete-all').disabled = locked || records.length === 0;
     $('export-json').disabled = locked;
     $('export-csv').disabled = locked;
+    renderBackupReminder();
   }
   function download(content, type, filename) {
     const url = URL.createObjectURL(new Blob([content], { type }));
@@ -231,6 +309,8 @@
     try { record = formRecord(); } catch (error) { message('form-message', error.message, true); return; }
     pending = true;
     try {
+      const missing = ['dayType', 'weight', 'bodyFat', 'waist', 'protein', 'fat', 'carbs', 'sleep', 'fatigue', 'bowel'].filter(key => record[key] == null || record[key] === '');
+      if (missing.length && !await confirmAction('未入力の項目があります', '以下は未記録として保存されます。\n' + missing.map(key => '・' + K.labels[key]).join('\n'), 'このまま保存する', false, '入力画面に戻る')) return;
       if (records.some(r => r.date === record.date) && !await confirmAction('この日の記録を上書きしますか？', `${dateLabel(record.date)} の保存済み記録を、今の入力内容で置き換えます。\n空欄にした項目も、未記録に変わります。`, '上書きして保存')) return;
       if (persist(K.mergeRecords(records, [record]))) {
         resetForm(); form.elements.date.value = record.date; updateRecordDates(); render();
@@ -246,7 +326,18 @@
   $('history-month').addEventListener('change', () => { historyLimit = 30; renderHistory(); });
   $('all-history').addEventListener('click', () => { $('history-month').value = ''; historyLimit = 30; renderHistory(); });
   $('load-more').addEventListener('click', () => { historyLimit += 30; renderHistory(); });
-  $('export-json').addEventListener('click', () => download(K.backup(records, targetHistory), 'application/json;charset=utf-8', `karada-log-${K.today()}.json`));
+  $('replace-alcohol').addEventListener('change', () => { form.elements.alcohol.disabled = !$('replace-alcohol').checked; });
+  $('export-json').addEventListener('click', () => {
+    if (locked) return;
+    try {
+      download(K.backup(records, targetHistory), 'application/json;charset=utf-8', `karada-log-${K.today()}.json`);
+    } catch { message('backup-message', 'JSONの書き出し操作を開始できませんでした。もう一度お試しください。', true); return; }
+    try { localStorage.setItem(backupTimeKey, new Date().toISOString()); }
+    catch { message('backup-message', '書き出し操作を開始しましたが、通知用日時は保存できませんでした。ファイルの保管を確認してください。', true); }
+    renderBackupReminder();
+  });
+  window.addEventListener('focus', renderBackupReminder);
+  window.addEventListener('pageshow', renderBackupReminder);
   $('export-csv').addEventListener('click', () => download(K.csv(records), 'text/csv;charset=utf-8', `karada-log-${K.today()}.csv`));
   $('restore-file').addEventListener('change', async event => {
     const file = event.target.files[0];
