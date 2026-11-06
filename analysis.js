@@ -75,7 +75,7 @@
   // 以下はコピー文章の整形専用。上の集計・判定結果は変更しません。
   const textNames = { weight: '体重kg', bodyFat: '体脂肪%', waist: 'ウエストcm', protein: 'Pg', fat: 'Fg', carbs: 'Cg', calories: 'kcal', sleep: '睡眠h', fatigue: '疲労' };
   const textNumber = value => value == null ? '—' : String(value);
-  const textCell = value => String(value).replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\|/g, '\\|');
+  const textCell = value => String(value).replace(/[\\\r\n|]/g, ch => ({ '\\': '\\\\', '\r': '\\r', '\n': '\\n', '|': '\\|' }[ch]));
   function textQuality(s) { return s.quality === '記録不足・参考値' ? '・記録不足・参考値' : ''; }
   function textCoverage(s) { return `${s.count}/${s.expected}日${textQuality(s)}`; }
   function textAchievement(data) {
