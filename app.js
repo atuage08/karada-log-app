@@ -148,18 +148,30 @@
     const timestamp = date => +new Date(date + 'T00:00:00Z');
     const x = date => left + (timestamp(date) - timestamp(start)) / (timestamp(end) - timestamp(start)) * (width - left - right);
     const y = value => top + (max - value) / (max - min) * (height - top - bottom);
-    let svg = `<svg class="trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="chart-title chart-description"><title id="chart-title">${label}の推移</title><desc id="chart-description">${start}から${end}まで、${data.length}件の記録。単位${unit}。詳しい数値は下の表で確認できます。</desc>`;
+    // SVG文字列をHTMLとして解析せず、属性と文字を個別に設定します。
+    function svgElement(tag, attributes = {}, text) {
+      const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, String(value));
+      if (text !== undefined) element.textContent = text;
+      return element;
+    }
+    const svg = svgElement('svg', { class: 'trend-chart', viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-labelledby': 'chart-title chart-description' });
+    svg.append(svgElement('title', { id: 'chart-title' }, `${label}の推移`), svgElement('desc', { id: 'chart-description' }, `${start}から${end}まで、${data.length}件の記録。単位${unit}。詳しい数値は下の表で確認できます。`));
     for (let i = 0; i <= 4; i++) {
       const value = min + (max - min) * i / 4, py = y(value);
-      svg += `<line class="chart-grid" x1="${left}" x2="${width - right}" y1="${py}" y2="${py}"/><text class="chart-label" x="${left - 12}" y="${py + 4}" text-anchor="end">${number(value)}</text>`;
+      svg.append(svgElement('line', { class: 'chart-grid', x1: left, x2: width - right, y1: py, y2: py }), svgElement('text', { class: 'chart-label', x: left - 12, y: py + 4, 'text-anchor': 'end' }, number(value)));
     }
     const line = data.map((r, i) => `${i ? 'L' : 'M'}${x(r.date).toFixed(2)},${y(r[key]).toFixed(2)}`).join(' ');
-    svg += `<path d="${line}" class="chart-line"/>`;
-    svg += data.map(r => `<circle class="chart-point" cx="${x(r.date)}" cy="${y(r[key])}" r="4"><title>${r.date}：${number(r[key])} ${unit}</title></circle>`).join('');
+    svg.append(svgElement('path', { d: line, class: 'chart-line' }));
+    for (const r of data) {
+      const point = svgElement('circle', { class: 'chart-point', cx: x(r.date), cy: y(r[key]), r: 4 });
+      point.append(svgElement('title', {}, `${r.date}：${number(r[key])} ${unit}`));
+      svg.append(point);
+    }
     const spanDays = Math.round((timestamp(end) - timestamp(start)) / 86400000);
     const ticks = [...new Set([start, K.shiftDate(start, Math.round(spanDays / 2)), end])];
-    svg += ticks.map((date, i) => `<text class="chart-label" x="${x(date)}" y="${height - 13}" text-anchor="${i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'middle'}">${days === 0 && spanDays > 365 ? date : shortDate(date)}</text>`).join('') + '</svg>';
-    $('chart-container').innerHTML = svg;
+    ticks.forEach((date, i) => svg.append(svgElement('text', { class: 'chart-label', x: x(date), y: height - 13, 'text-anchor': i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'middle' }, days === 0 && spanDays > 365 ? date : shortDate(date))));
+    $('chart-container').replaceChildren(svg);
     $('chart-table').innerHTML = `<table><thead><tr><th>日付</th><th>${label} (${unit})</th></tr></thead><tbody>${data.map(r => `<tr><td>${r.date}</td><td>${number(r[key])}</td></tr>`).join('')}</tbody></table>`;
   }
   function renderHistory() {
