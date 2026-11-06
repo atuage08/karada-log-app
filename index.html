@@ -35,12 +35,13 @@
     </nav>
     <main id="main">
       <div id="storage-warning" class="notice danger" hidden role="alert"></div>
+      <aside id="backup-reminder" class="notice" hidden aria-label="バックアップのご案内"><p id="backup-reminder-text"></p><button class="text-button" type="button" data-go="backup">バックアップ画面へ →</button></aside>
       <div id="migration-warning" class="notice" hidden role="status"></div>
       <noscript><p class="notice danger">このアプリにはJavaScriptが必要です。ブラウザの設定で有効にしてください。</p></noscript>
       <section id="view-record" class="view" aria-labelledby="record-title">
         <div class="page-heading"><div><p class="eyebrow">DAILY NOTE</p><h1 id="record-title">今日のからだを、記録しよう。</h1><p class="subtitle">ひとつの項目からで大丈夫。自分のペースで続けましょう。</p></div><span id="today-label" class="date-stamp"></span></div>
         <div class="record-layout">
-          <form id="record-form">
+          <form id="record-form" novalidate>
             <section class="card"><div class="card-heading"><span class="section-number">01</span><h2>日付と日種別</h2></div>
               <div class="two-columns"><label>記録する日 <span class="required">必須</span><input name="date" id="record-date" type="date" min="1900-01-01" max="2100-12-31" required></label>
                 <label>前日の日種別<select name="dayType"><option value="">未選択</option><option>ト</option><option>へき</option><option>きき</option></select></label></div>
@@ -68,18 +69,20 @@
             </section>
             <section class="card"><div class="card-heading"><span class="section-number">04</span><h2>前日の活動・生活</h2></div>
               <p id="activity-date" class="period-note"></p>
-              <div class="two-columns">
-                <label>筋トレ時間<div class="unit-input"><input name="strength" type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="—"><span>分</span></div></label>
-                <label>有酸素運動<div class="unit-input"><input name="cardio" type="number" inputmode="numeric" min="0" step="1" placeholder="空欄なら0"><span>分</span></div></label>
-                <label>アルコール<input name="alcohol" type="text" maxlength="200" placeholder="例：なし / ビール 350mL"></label>
+              <div class="two-columns exercise-fields">
+                <div class="strength-time-group" role="group" aria-labelledby="strength-time-label"><span id="strength-time-label" class="exercise-time-title">筋トレ時間</span><div class="two-columns"><label><span class="sr-only">時間</span><div class="unit-input"><input name="strengthHours" type="number" inputmode="numeric" min="0" step="1"><span aria-hidden="true">時間</span></div></label><label><span class="sr-only">分</span><div class="unit-input"><input name="strengthMinutes" type="number" inputmode="numeric" min="0" max="59" step="1"><span aria-hidden="true">分</span></div></label></div><p class="help">両方空欄なら0分</p></div>
+                <label class="cardio-time-field">有酸素運動<div class="unit-input"><input name="cardio" type="number" inputmode="numeric" min="0" step="1" placeholder="空欄なら0"><span>分</span></div></label>
+                <div><label>アルコール<select name="alcohol"><option>なし</option><option>あり</option></select></label><div id="legacy-alcohol" hidden><p id="legacy-alcohol-value" class="help"></p><label><input id="replace-alcohol" type="checkbox">上の「なし／あり」で旧記録を置き換える</label></div></div>
                 <label>便通<select name="bowel"><option value="">未選択</option><option>あり</option><option>なし</option></select></label>
               </div>
-              <p class="help">筋トレ・有酸素は0以上の整数（分）で入力します。新規記録の空欄は0分です。記録のない日は未記録として扱います。運動の種類は自由メモに書けます。</p>
-              <p id="exercise-edit-note" class="help" hidden>旧記録の時間未確定欄は、空欄のまま変更を保存すると0分になります。元の内容は自由メモで確認してください。</p>
+              <p class="help">筋トレは時間と分、有酸素は合計分数を整数で入力します。新規記録の空欄は0分です。記録のない日は未記録として扱います。運動の種類は自由メモに書けます。</p>
+              <p id="exercise-edit-note" class="help" hidden>旧記録の時間未確定欄は、変更しない限り未確定のまま保持します。元の内容は自由メモで確認してください。</p>
             </section>
             <section class="card"><div class="card-heading"><span class="section-number">05</span><h2>前夜から当日朝の睡眠</h2></div>
               <p id="sleep-date" class="period-note"></p>
-              <label>睡眠時間<div class="unit-input"><input name="sleep" type="number" inputmode="decimal" min="0" max="24" step="0.1" placeholder="—"><span>時間</span></div></label>
+              <div class="two-columns"><label>睡眠時間（時間）<input name="sleepHours" type="number" inputmode="numeric" min="1" max="24" step="1"></label><label>睡眠時間（分）<input name="sleepMinutes" type="number" inputmode="numeric" min="0" max="59" step="1"></label></div>
+              <p class="help">時間は1以上、分は0〜59。合計24時間以内。両方空欄は確認後に未記録として保存できます。</p><p id="sleep-edit-note" class="help" hidden></p>
+              <div id="legacy-sleep-choice" hidden><label><input id="clear-legacy-sleep" type="checkbox">旧睡眠値を保持せず、未記録へ変更する</label><p class="help">チェックしなければ、空欄のままでも旧値を保持します。チェックすると入力欄より優先して未記録にします。保存前に確認画面を表示します。</p></div>
               <p class="help">集計では、起床した当日朝の日付で扱います。</p>
             </section>
             <section class="card"><div class="card-heading"><span class="section-number">06</span><h2>自由メモ</h2></div>
@@ -118,7 +121,7 @@
     </main>
     <footer class="site-footer"><span>からだ記録</span><span>自分のペースで、毎日を。</span></footer>
   </div>
-  <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-description"><form method="dialog"><p class="eyebrow">PLEASE CONFIRM</p><h2 id="confirm-title"></h2><p id="confirm-description"></p><div class="button-row"><button class="button secondary" value="cancel" autofocus>やめる</button><button class="button primary" id="confirm-accept" value="accept">実行する</button></div></form></dialog>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-description"><form method="dialog"><p class="eyebrow">PLEASE CONFIRM</p><h2 id="confirm-title"></h2><p id="confirm-description"></p><div class="button-row"><button class="button secondary" id="confirm-cancel" value="cancel" autofocus>やめる</button><button class="button primary" id="confirm-accept" value="accept">実行する</button></div></form></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

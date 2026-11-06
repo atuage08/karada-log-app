@@ -4,6 +4,15 @@
   const escape = v => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmt = v => v == null ? 'データなし' : v.toLocaleString('ja-JP', { maximumFractionDigits: 2 });
   const diff = v => v == null ? '比較不可' : (v > 0 ? '+' : '') + fmt(v);
+  // 画面表示専用。元の小数時間や集計値は変更しません。
+  function formatSleep(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 'データなし';
+    const minutes = Math.round(value * 60);
+    return `${Math.floor(minutes / 60)}時間${minutes % 60}分`;
+  }
+  const metricLabel = key => key === 'sleep' ? '睡眠時間' : K.labels[key] || '摂取カロリー(kcal)';
+  const metricValue = (key, value) => key === 'sleep' ? formatSleep(value) : fmt(value);
+  const metricDiff = (key, value) => key === 'sleep' && value != null ? (value > 0 ? '+' : value < 0 ? '−' : '') + formatSleep(Math.abs(value)) : diff(value);
   let hooks;
   function coverage(s) { return `${s.count}日／${s.expected}日・${s.quality}`; }
   function table(headers, rows) { return `<div class="table-wrap"><table><thead><tr>${headers.map(h => `<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`; }
@@ -27,8 +36,8 @@
     $('analysis-anchor').textContent = a.latest ? `分析基準日：${a.latest}（保存済み最新記録日）。下の分析は上部の日付選択とは独立しています。` : '記録がまだありません。1件以上保存すると期間分析とコピーが使えます。';
     $('copy-analysis').disabled = !a.latest || locked;
     $('copy-fallback').hidden = true; $('analysis-copy-text').value = ''; $('copy-message').textContent = '';
-    $('period-comparisons').innerHTML = a.comparisons.map(c => `<details class="analysis-detail"><summary>直近${c.days}日平均・直前${c.days}日との比較</summary><p class="help">身体：${c.metrics.weight.current.start}〜${c.metrics.weight.current.end}／食事・運動：${c.metrics.protein.current.start}〜${c.metrics.protein.current.end}。比較期間は、それぞれ直前の同日数です。</p>${table(['項目', '直近平均・有効日数', '前期間平均・有効日数', '差（直近−前）'], Object.entries(c.metrics).map(([key, s]) => [K.labels[key] || '摂取カロリー(kcal)', `${fmt(s.current.value)}<br>${coverage(s.current)}`, `${fmt(s.previous.value)}<br>${coverage(s.previous)}`, diff(s.diff)]))}<h3>直近の運動</h3>${exerciseTable(Object.fromEntries(Object.entries(c.exercise).map(([key, s]) => [key, s.current])))}<h3>前期間の運動</h3>${exerciseTable(Object.fromEntries(Object.entries(c.exercise).map(([key, s]) => [key, s.previous])))}<p class="help">合計時間の差：${Object.entries(c.exercise).map(([key, s]) => `${K.labels[key]} ${diff(s.diff)}`).join('／')}</p><details><summary>日種別ごとのPFC達成状況</summary>${achievementTable(A.achievement(records, history, c.metrics.protein.current.start, c.metrics.protein.current.end))}</details></details>`).join('');
-    $('week-analysis').innerHTML = [...a.weeks].reverse().map(w => `<details class="analysis-detail"><summary>${w.start}〜${w.end} ${w.complete ? '完了週' : '今週・途中経過'}</summary><p class="help">${w.complete ? '月曜日〜日曜日の7日間。前週比は完了週同士です。' : `身体は${w.bodyEnd}まで、食事・活動は${w.foodEnd}まで。未来の日は分母に含めず、合計・実施日数を完了週と単純比較しません。`}</p>${table(['項目', '平均', '前週比', '有効記録'], Object.entries(w.metrics).map(([key, s]) => [K.labels[key] || '摂取カロリー(kcal)', fmt(s.value), key in w.deltas ? diff(w.deltas[key]) : '—', coverage(s)]))}${exerciseTable(w.exercise)}<details><summary>PFC達成率・不足・超過</summary>${achievementTable(w.achievement)}</details></details>`).join('');
+    $('period-comparisons').innerHTML = a.comparisons.map(c => `<details class="analysis-detail"><summary>直近${c.days}日平均・直前${c.days}日との比較</summary><p class="help">身体：${c.metrics.weight.current.start}〜${c.metrics.weight.current.end}／食事・運動：${c.metrics.protein.current.start}〜${c.metrics.protein.current.end}。比較期間は、それぞれ直前の同日数です。</p>${table(['項目', '直近平均・有効日数', '前期間平均・有効日数', '差（直近−前）'], Object.entries(c.metrics).map(([key, s]) => [metricLabel(key), `${metricValue(key, s.current.value)}<br>${coverage(s.current)}`, `${metricValue(key, s.previous.value)}<br>${coverage(s.previous)}`, metricDiff(key, s.diff)]))}<h3>直近の運動</h3>${exerciseTable(Object.fromEntries(Object.entries(c.exercise).map(([key, s]) => [key, s.current])))}<h3>前期間の運動</h3>${exerciseTable(Object.fromEntries(Object.entries(c.exercise).map(([key, s]) => [key, s.previous])))}<p class="help">合計時間の差：${Object.entries(c.exercise).map(([key, s]) => `${K.labels[key]} ${diff(s.diff)}`).join('／')}</p><details><summary>日種別ごとのPFC達成状況</summary>${achievementTable(A.achievement(records, history, c.metrics.protein.current.start, c.metrics.protein.current.end))}</details></details>`).join('');
+    $('week-analysis').innerHTML = [...a.weeks].reverse().map(w => `<details class="analysis-detail"><summary>${w.start}〜${w.end} ${w.complete ? '完了週' : '今週・途中経過'}</summary><p class="help">${w.complete ? '月曜日〜日曜日の7日間。前週比は完了週同士です。' : `身体は${w.bodyEnd}まで、食事・活動は${w.foodEnd}まで。未来の日は分母に含めず、合計・実施日数を完了週と単純比較しません。`}</p>${table(['項目', '平均', '前週比', '有効記録'], Object.entries(w.metrics).map(([key, s]) => [metricLabel(key), metricValue(key, s.value), key in w.deltas ? diff(w.deltas[key]) : '—', coverage(s)]))}${exerciseTable(w.exercise)}<details><summary>PFC達成率・不足・超過</summary>${achievementTable(w.achievement)}</details></details>`).join('');
     renderGoals(history);
   }
   function init(options) {
@@ -56,5 +65,5 @@
     });
     $('select-analysis').addEventListener('click', () => { $('analysis-copy-text').focus(); $('analysis-copy-text').select(); $('analysis-copy-text').setSelectionRange(0, $('analysis-copy-text').value.length); });
   }
-  window.KaradaAnalysisUI = { init, render };
+  window.KaradaAnalysisUI = { init, render, formatSleep };
 })();
