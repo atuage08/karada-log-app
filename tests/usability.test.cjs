@@ -235,6 +235,103 @@ async function runTests() {
     const h = setup([row]); h.formatSleep(row.sleep); assert.equal(A.analysisText([row], []), before);
     assert.ok(before.includes('|6.416666666666667|')); assert.equal(h.record().sleep, row.sleep);
   });
+  // 復元の異常系は、架空JSONと模擬localStorageだけで検証します。
+  const beforeRows = [K.validateRecord({ date: '2026-11-05', weight: 67 }), K.validateRecord({ date, weight: 66 })];
+  const incomingRows = [K.validateRecord({ date, weight: 65, sleep: 6.42 }), K.validateRecord({ date: '2026-11-07', weight: 64 })];
+  const beforeGoals = K.validateHistory([{ effectiveFrom: '2026-11-01', targets: K.DEFAULT_TARGETS }]);
+  const incomingTargets = JSON.parse(JSON.stringify(K.DEFAULT_TARGETS)); incomingTargets['ト'].protein = { min: 145, max: 155 };
+  const incomingGoals = K.validateHistory([{ effectiveFrom: '2026-11-02', targets: incomingTargets }]);
+  const incomingBackup = K.backup(incomingRows, incomingGoals);
+  const restoreSetup = (options = {}) => { options.initialRaw ??= K.backup(beforeRows, beforeGoals); return setup([], options); };
+  const stateData = h => JSON.parse(JSON.stringify({ records: h.getState().records, targetHistory: h.getState().targetHistory }));
+  const restore = async (h, { text = incomingBackup, mode = 'replace', targetMode = 'replace' } = {}) => {
+    h.elements.get('restore-mode').value = mode; h.elements.get('restore-target-mode').value = targetMode;
+    await h.elements.get('restore-file').listeners.change({ target: { value: '架空.json', files: [{ size: text.length, text: async () => text }] } });
+  };
+  for (const mode of ['merge', 'replace']) await test(`復元保存失敗（${mode}）で保存済みJSON・メモリ・目標履歴を保持し、操作停止しない`, async () => {
+    const options = { failRecordWrites: true }, h = restoreSetup(options), raw = h.getStored(), memory = stateData(h);
+    await restore(h, { mode });
+    assert.equal(h.getStored(), raw); assert.deepEqual(stateData(h), memory); assert.equal(h.writes.length, 0);
+    assert.equal(h.writeAttempts.length, 1); assert.equal(h.getState().locked, false); assert.equal(h.getState().pending, false);
+    assert.ok(h.elements.get('backup-message').textContent.includes('復元内容を保存できませんでした'));
+    assert.equal(h.elements.get('storage-warning').hidden, true); assert.equal(h.elements.get('save-button').disabled, false);
+    options.failRecordWrites = false;
+    await restore(h, { mode }); assert.equal(h.writes.length, 1); assert.equal(h.getState().locked, false);
+  });
+  await test('復元保存成功後のrender失敗では新データを維持し、renderに頼らず警告・操作停止を適用', async () => {
+    const h = restoreSetup(), oldHistory = h.elements.get('history-list').innerHTML;
+    h.failNextRender(); await restore(h);
+    const expected = { records: incomingRows, targetHistory: incomingGoals };
+    const stored = K.parseBackup(h.getStored()); assert.deepEqual({ records: stored.records, targetHistory: stored.targetHistory }, expected);
+    assert.deepEqual(stateData(h), expected); assert.equal(h.writes.length, 1); assert.equal(h.getRenderFailures(), 1);
+    assert.equal(h.elements.get('history-list').innerHTML, oldHistory); // renderの途中で止めても独立した警告は表示される。
+    assert.equal(h.getState().locked, true); assert.equal(h.getState().pending, false);
+    const warning = h.elements.get('storage-warning'); assert.equal(warning.hidden, false);
+    for (const word of ['復元データは保存されました', '画面を更新できませんでした', '変更操作を停止', '再読み込み', '未保存の入力']) assert.ok(warning.textContent.includes(word));
+    assert.equal(warning.textContent.includes('記録は変更していません'), false); assert.equal(warning.innerHTML, '');
+    assert.equal(h.elements.get('backup-message').textContent, warning.textContent); assert.equal(h.elements.get('backup-message').className, 'error');
+    for (const id of ['save-button', 'restore-file', 'delete-all', 'export-json', 'export-csv']) assert.equal(h.elements.get(id).disabled, true, id);
+    for (const button of [h.historyEdit, h.historyDelete, h.targetSubmit]) assert.equal(button.disabled, true);
+  });
+  await test('操作停止中はボタンを迂回して各イベントを呼んでも保存・復元・削除・PFC変更・日時更新を防止', async () => {
+    const h = restoreSetup(); h.failNextRender(); await restore(h);
+    const raw = h.getStored(), memory = stateData(h), attempts = h.writeAttempts.length, confirms = h.confirmations.length;
+    h.controls.weight.value = '60'; await h.save();
+    let read = false;
+    await h.elements.get('restore-file').listeners.change({ target: { value: '', files: [{ size: 1, text: async () => { read = true; return incomingBackup; } }] } });
+    await h.events['document:click']({ target: { closest: selector => selector === '[data-delete]' ? { dataset: { delete: date } } : null } });
+    await h.elements.get('delete-all').listeners.click();
+    await h.elements.get('target-form').listeners.submit({ preventDefault() {} });
+    await h.saveTargets(beforeGoals, '2026-11-01'); // UIを迂回した目標保存も拒否。
+    h.elements.get('export-json').listeners.click();
+    assert.equal(read, false); assert.equal(h.writeAttempts.length, attempts); assert.equal(h.confirmations.length, confirms);
+    assert.equal(h.getStored(), raw); assert.deepEqual(stateData(h), memory); assert.equal(h.getState().locked, true); assert.equal(h.getState().pending, false);
+    assert.equal(h.metadata.size, 0);
+  });
+  await test('再読み込みを模した新環境で保存済み記録・目標を復旧し、保存・目標変更・削除を再開', async () => {
+    const failed = restoreSetup(); failed.failNextRender(); await restore(failed);
+    const raw = failed.getStored(), h = restoreSetup({ initialRaw: raw });
+    assert.equal(h.getStored(), raw); assert.equal(h.writes.length, 0); assert.equal(h.getState().locked, false); assert.equal(h.getState().pending, false);
+    assert.deepEqual(stateData(h), { records: incomingRows, targetHistory: incomingGoals });
+    assert.equal(h.elements.get('storage-warning').hidden, true);
+    assert.equal(h.elements.get('storage-warning').textContent, '');
+    for (const id of ['save-button', 'restore-file', 'delete-all', 'export-json', 'export-csv']) assert.equal(h.elements.get(id).disabled, false);
+    assert.equal(h.targetSubmit.disabled, false); assert.ok(h.elements.get('history-list').innerHTML.includes('65.0'));
+    h.controls.date.value = '2026-11-08'; h.controls.weight.value = '63'; await h.save();
+    const nextGoals = K.validateHistory([...incomingGoals, { effectiveFrom: '2026-11-08', targets: K.DEFAULT_TARGETS }]);
+    await h.saveTargets(nextGoals, '2026-11-08');
+    await h.events['document:click']({ target: { closest: selector => selector === '[data-delete]' ? { dataset: { delete: '2026-11-08' } } : null } });
+    const result = K.parseBackup(h.getStored()); assert.deepEqual(result.records, incomingRows); assert.deepEqual(result.targetHistory, nextGoals);
+    assert.equal(h.writes.length, 3); assert.equal(h.getState().locked, false);
+  });
+  for (const mode of ['merge', 'replace']) for (const targetMode of ['keep', 'merge', 'replace']) await test(`通常復元（${mode}／目標${targetMode}）の画面更新・整合性・非ロックを維持`, async () => {
+    const h = restoreSetup(); await restore(h, { mode, targetMode });
+    const expected = { records: mode === 'replace' ? incomingRows : K.mergeRecords(beforeRows, incomingRows), targetHistory: targetMode === 'keep' ? beforeGoals : targetMode === 'replace' ? incomingGoals : K.validateHistory([...beforeGoals, ...incomingGoals]) };
+    const stored = K.parseBackup(h.getStored()); assert.deepEqual({ records: stored.records, targetHistory: stored.targetHistory }, expected); assert.deepEqual(stateData(h), expected);
+    assert.equal(h.writes.length, 1); assert.equal(h.getState().locked, false); assert.equal(h.getState().pending, false);
+    assert.ok(h.elements.get('backup-count').textContent.includes(`${expected.records.length}件`)); assert.ok(h.elements.get('backup-message').textContent.includes('復元しました'));
+    assert.ok(h.elements.get('target-history').innerHTML.includes('145〜155') === (targetMode !== 'keep'));
+    assert.equal(h.elements.get('restore-file').disabled, false);
+  });
+  await test('復元取消では記録・目標履歴を変更せず、操作停止しない', async () => {
+    const h = restoreSetup(), raw = h.getStored(), memory = stateData(h); h.answers.push(false); await restore(h);
+    assert.equal(h.getStored(), raw); assert.deepEqual(stateData(h), memory); assert.equal(h.writeAttempts.length, 0);
+    assert.equal(h.getState().locked, false); assert.equal(h.getState().pending, false); assert.ok(h.elements.get('backup-message').textContent.includes('復元を中止しました'));
+    h.controls.date.value = '2026-11-08'; h.controls.weight.value = '64'; await h.save(); assert.equal(h.writes.length, 1);
+  });
+  await test('不正JSON拒否では既存データを保持し、表示失敗用のロックを適用しない', async () => {
+    const h = restoreSetup(), raw = h.getStored(); await restore(h, { text: '{invalid' });
+    assert.equal(h.getStored(), raw); assert.equal(h.writeAttempts.length, 0); assert.equal(h.getState().locked, false); assert.equal(h.getState().pending, false);
+    assert.ok(h.elements.get('backup-message').textContent.includes('保存済みの記録はそのままです'));
+  });
+  await test('旧JSON復元後の表示失敗・再読み込みでも移行済み記録と既存目標を保持', async () => {
+    const text = JSON.stringify({ schemaVersion: 1, records: [{ date, weight: 65, sleep: 6.42, strength: null, cardio: '架空の旧散歩', memo: '旧架空メモ' }] });
+    const expected = { records: K.parseBackup(text).records, targetHistory: beforeGoals };
+    const h = restoreSetup(); h.failNextRender(); await restore(h, { text, targetMode: 'keep' });
+    assert.equal(h.getState().locked, true); assert.equal(JSON.parse(h.getStored()).schemaVersion, 2);
+    const reloaded = restoreSetup({ initialRaw: h.getStored() }); assert.deepEqual(stateData(reloaded), expected);
+    assert.equal(reloaded.getState().locked, false); assert.equal(reloaded.writes.length, 0);
+  });
   return passed;
 }
 module.exports = { runTests };
