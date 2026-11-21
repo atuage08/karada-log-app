@@ -4,7 +4,7 @@ const assert = require('node:assert/strict'), fs = require('node:fs'), path = re
 const K = require('../core.js'), A = require('../analysis.js');
 const root = path.join(__dirname, '..');
 function harness(records = [], appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8'), options = {}) {
-  const elements = new Map(), writes = [], metadata = new Map(Object.entries(options.metadata || {})), confirmations = [], answers = [], events = {};
+  const elements = new Map(), writes = [], writeAttempts = [], metadata = new Map(Object.entries(options.metadata || {})), confirmations = [], answers = [], events = {};
   const node = (tagName = '', namespaceURI = '') => ({
     tagName, namespaceURI, attributes: {}, children: [], value: '', hidden: false, disabled: false, textContent: '', innerHTML: '', listeners: {},
     setAttribute(key, value) { this.attributes[key] = String(value); }, removeAttribute(key) { delete this.attributes[key]; },
@@ -14,7 +14,16 @@ function harness(records = [], appSource = fs.readFileSync(path.join(root, 'app.
     showModal() { confirmations.push({ title: elements.get('confirm-title').textContent, text: elements.get('confirm-description').textContent, cancel: elements.get('confirm-cancel').textContent }); this.returnValue = answers.shift() === false ? 'cancel' : 'accept'; this.listeners.close(); }
   });
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-  for (const m of html.matchAll(/\bid="([^"]+)"/g)) elements.set(m[1], node());
+  for (const m of html.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)) {
+    const element = node(); element.hidden = /\shidden(?:\s|>|=)/.test(m[0]); elements.set(m[1], element);
+  }
+  const historyEdit = node(), historyDelete = node(), targetSubmit = node();
+  elements.get('target-form').querySelector = selector => selector === 'button[type="submit"]' ? targetSubmit : null;
+  let failNextRender = false, renderFailures = 0, summaryMarkup = '';
+  Object.defineProperty(elements.get('summary-cards'), 'innerHTML', {
+    get() { return summaryMarkup; },
+    set(value) { if (failNextRender) { failNextRender = false; renderFailures++; throw Error('架空の画面更新失敗'); } summaryMarkup = value; }
+  });
   const controls = {};
   const formHTML = html.slice(html.indexOf('<form id="record-form"'), html.indexOf('</form>'));
   for (const m of formHTML.matchAll(/\bname="([^"]+)"/g)) controls[m[1]] = node();
@@ -22,19 +31,24 @@ function harness(records = [], appSource = fs.readFileSync(path.join(root, 'app.
   form.reset = () => Object.values(controls).forEach(el => { el.value = ''; });
   elements.set('record-date', controls.date);
   elements.get('chart-metric').value = 'weight'; elements.get('chart-period').value = '30';
-  let stored = K.backup(records);
+  let stored = options.initialRaw ?? K.backup(records);
   const context = {
     console, location: { hash: '#history' }, setTimeout: () => 0, clearTimeout() {}, addEventListener(type, fn) { events[type] = fn; },
     Date: options.now == null ? Date : class extends Date { constructor(...args) { super(...(args.length ? args : [options.now])); } static now() { return options.now; } },
     Blob, URL: { createObjectURL() { if (options.downloadFailure) throw Error('download failed'); return 'blob:test'; }, revokeObjectURL() {} },
     FormData: class { constructor(f) { this.form = f; } *[Symbol.iterator]() { for (const [key, el] of Object.entries(this.form.elements)) if (!el.disabled) yield [key, el.value]; } },
-    document: { body: node(), createElement: () => node(), getElementById: id => elements.get(id), querySelectorAll: () => [], addEventListener(type, fn) { events['document:' + type] = fn; }, createElementNS: (ns, tag) => node(tag, ns) },
-    localStorage: { getItem: key => key === K.STORAGE_KEY ? stored : metadata.get(key) ?? null, setItem(key, value) { if (key === K.STORAGE_KEY) { stored = value; writes.push(value); } else { if (options.metadataFailure) throw Error('quota'); metadata.set(key, value); } } }
+    document: { body: node(), createElement: () => node(), getElementById: id => elements.get(id), querySelectorAll: selector => selector === '[data-edit], [data-delete], #target-form button[type="submit"]' ? [historyEdit, historyDelete, targetSubmit] : [], addEventListener(type, fn) { events['document:' + type] = fn; }, createElementNS: (ns, tag) => node(tag, ns) },
+    localStorage: { getItem: key => key === K.STORAGE_KEY ? stored : metadata.get(key) ?? null, setItem(key, value) { writeAttempts.push(key); if (key === K.STORAGE_KEY) { if (options.failRecordWrites) throw Error('架空の保存容量不足'); stored = value; writes.push(value); } else { if (options.metadataFailure) throw Error('quota'); metadata.set(key, value); } } }
   };
   context.window = context; vm.createContext(context);
   for (const file of ['core.js', 'analysis.js', 'analysis-ui.js']) vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context);
+  let appHooks;
+  const originalInit = context.KaradaAnalysisUI.init;
+  context.KaradaAnalysisUI.init = hooks => { appHooks = hooks; originalInit(hooks); };
   vm.runInContext(appSource, context);
-  return { elements, controls, form, writes, metadata, confirmations, answers, events, formatSleep: context.KaradaAnalysisUI.formatSleep, getStored: () => stored };
+  return { elements, controls, form, writes, writeAttempts, metadata, confirmations, answers, events, historyEdit, historyDelete, targetSubmit,
+    formatSleep: context.KaradaAnalysisUI.formatSleep, getStored: () => stored, getState: () => appHooks.getState(), saveTargets: (...args) => appHooks.saveTargets(...args),
+    failNextRender() { failNextRender = true; }, getRenderFailures: () => renderFailures };
 }
 async function runTests() {
   const passed = [], test = async (name, fn) => { await fn(); passed.push(name); };

@@ -57,6 +57,14 @@
       return false;
     }
   }
+  function stopChangesUntilReload(detail) {
+    locked = true;
+    // render()を呼ばず、部分的に更新された画面でも警告と操作停止を適用します。
+    $('storage-warning').textContent = detail;
+    $('storage-warning').hidden = false;
+    ['save-button', 'restore-file', 'delete-all', 'export-json', 'export-csv'].forEach(id => { $(id).disabled = true; });
+    document.querySelectorAll('[data-edit], [data-delete], #target-form button[type="submit"]').forEach(button => { button.disabled = true; });
+  }
   function switchView(view, focus = true) {
     if (!['record', 'overview', 'history', 'backup'].includes(view)) view = 'record';
     document.querySelectorAll('.view').forEach(el => { el.hidden = el.id !== `view-${view}`; });
@@ -372,8 +380,9 @@
       } else message('backup-message', '復元を中止しました。記録は変更していません。');
     } catch (error) {
       const detail = saved
-        ? '復元データは保存されましたが、画面を更新できませんでした。ページを再読み込みして、記録を確認してください。'
+        ? '復元データは保存されましたが、画面を更新できませんでした。誤操作を防ぐため、再読み込みまで変更操作を停止しています。ページを再読み込みして記録を確認してください。未保存の入力は再読み込みで失われます。'
         : `復元できませんでした。${error.message} 保存済みの記録はそのままです。`;
+      if (saved) stopChangesUntilReload(detail);
       message('backup-message', detail, true);
     }
     finally { pending = false; }
