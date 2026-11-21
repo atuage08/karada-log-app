@@ -32,7 +32,7 @@ async function runTests() {
     const h = setup(); h.controls.weight.value = '65'; h.controls.sleepHours.value = hour; h.controls.sleepMinutes.value = minute; await h.save(); assert.equal(h.writes.length, 0); assert.equal(h.confirmations.length, 0);
   });
   await test('未入力一覧は10項目を独立表示し、戻る操作では保存せず入力を保持', async () => {
-    const h = setup(); h.controls.memo.value = '架空メモ'; h.answers.push(false); await h.save();
+    const h = setup(); h.controls.memo.value = '架空メモ'; h.controls.bowel.value = ''; h.answers.push(false); await h.save();
     assert.equal(h.writes.length, 0); assert.equal(h.controls.memo.value, '架空メモ');
     const c = h.confirmations[0]; assert.equal(c.cancel, '入力画面に戻る');
     for (const key of ['dayType', 'weight', 'bodyFat', 'waist', 'protein', 'fat', 'carbs', 'sleep', 'fatigue', 'bowel']) assert.ok(c.text.includes('・' + K.labels[key]));
@@ -82,7 +82,7 @@ async function runTests() {
     assert.deepEqual(K.parseBackup(h.getStored()).records, migrated.records);
     h.elements.get('restore-target-mode').value = 'replace';
     await h.elements.get('restore-file').listeners.change({ target: { files: [{ size: backup.length, text: async () => backup }], value: '' } });
-    const restored = K.parseBackup(h.getStored()); assert.deepEqual(restored.records, migrated.records); assert.deepEqual(restored.targetHistory, history); assert.equal(JSON.parse(h.getStored()).schemaVersion, 2);
+    const restored = K.parseBackup(h.getStored()); assert.deepEqual(restored.records, migrated.records); assert.deepEqual(restored.targetHistory, history); assert.equal(JSON.parse(h.getStored()).schemaVersion, 3);
     assert.equal(h.metadata.size, 0); // 復元をバックアップ書き出しと誤認しない。
   });
   const now = Date.parse('2026-11-06T12:00:00Z');
@@ -328,10 +328,156 @@ async function runTests() {
     const text = JSON.stringify({ schemaVersion: 1, records: [{ date, weight: 65, sleep: 6.42, strength: null, cardio: '架空の旧散歩', memo: '旧架空メモ' }] });
     const expected = { records: K.parseBackup(text).records, targetHistory: beforeGoals };
     const h = restoreSetup(); h.failNextRender(); await restore(h, { text, targetMode: 'keep' });
-    assert.equal(h.getState().locked, true); assert.equal(JSON.parse(h.getStored()).schemaVersion, 2);
+    assert.equal(h.getState().locked, true); assert.equal(JSON.parse(h.getStored()).schemaVersion, 3);
     const reloaded = restoreSetup({ initialRaw: h.getStored() }); assert.deepEqual(stateData(reloaded), expected);
     assert.equal(reloaded.getState().locked, false); assert.equal(reloaded.writes.length, 0);
   });
+
+  const setStatus = (h, status) => { h.controls.pfcStatus.value = status; h.controls.pfcStatus.listeners.change(); };
+  const restorePfc = (h, text, mode = 'merge') => { h.elements.get('restore-mode').value = mode; h.elements.get('restore-target-mode').value = 'keep'; return h.elements.get('restore-file').listeners.change({ target: { value: '', files: [{ size: text.length, text: async () => text }] } }); };
+  await test('新規は便通あり・通常記録・折りたたみ、初期値だけでは保存不可', async () => {
+    const h = setup(); assert.equal(h.controls.bowel.value, 'あり'); assert.equal(h.controls.pfcStatus.value, 'normal'); assert.equal(h.elements.get('pfc-status-details').open, false);
+    h.controls.memo.value = ' \t\n'; await h.save(); assert.equal(h.writes.length, 0); assert.equal(h.confirmations.length, 0);
+  });
+  await test('便通の旧未入力は編集・保存でも保持し新規だけあり', async () => {
+    const old = K.validateRecord({ date, weight: 65, bowel: '' }), h = setup([old]); const raw = h.getStored();
+    assert.equal(h.writes.length, 0); assert.equal(h.getStored(), raw); await h.edit(); assert.equal(h.controls.bowel.value, ''); await h.save(); assert.equal(h.record().bowel, ''); assert.equal(h.controls.bowel.value, 'あり');
+  });
+  await test('計測不可切り替えでPFC無効化・値保持・通常へ戻せる', async () => {
+    const h = setup(); for (const [key, value] of Object.entries({ protein: '155', fat: '65', carbs: '280' })) h.controls[key].value = value;
+    setStatus(h, 'eating_out'); for (const key of K.nutrients) assert.equal(h.controls[key].disabled, true);
+    assert.equal(h.elements.get('calorie-output').textContent, '対象外'); assert.ok(h.elements.get('pfc-status-summary').textContent.includes('外食・飲み会'));
+    setStatus(h, 'normal'); assert.equal(h.controls.protein.value, '155'); for (const key of K.nutrients) assert.equal(h.controls[key].disabled, false);
+    assert.equal(h.elements.get('calorie-output').textContent, '2,325.0'); await h.save(); assert.equal(h.record().protein, 155);
+  });
+  for (const status of ['eating_out', 'other']) await test('理由だけで保存・PFC入力漏れ警告なし：' + status, async () => {
+    const h = setup(); setStatus(h, status); await h.save(); assert.equal(h.record().pfcStatus, status);
+    for (const key of K.nutrients) { assert.equal(h.record()[key], null); assert.equal(h.confirmations[0].text.includes('・' + K.labels[key]), false); }
+    assert.ok(h.confirmations[0].text.includes('・' + K.labels.weight)); assert.equal(h.record().strength, 0);
+  });
+  await test('計測不可の保管値は保存と編集で維持し履歴・集計に実績として出さない', async () => {
+    const row = K.validateRecord({ date, pfcStatus: 'other', protein: 987.6, fat: 876.5, carbs: 765.4, weight: 65 }), h = setup([row]);
+    assert.equal(h.writes.length, 0); await h.edit(); assert.equal(h.controls.protein.value, ''); assert.equal(h.controls.protein.disabled, true);
+    assert.ok(h.elements.get('pfc-status-summary').textContent.includes('その他')); assert.equal(h.elements.get('pfc-status-details').open, false);
+    await h.save(); assert.deepEqual(h.record(), { ...row, alcohol: row.alcohol });
+    const history = h.elements.get('history-list').innerHTML; assert.ok(history.includes('対象外')); assert.ok(history.includes('その他')); assert.equal(history.includes('987.6'), false);
+    assert.ok(h.elements.get('history-count').textContent.includes('計測不可1件')); assert.ok(h.elements.get('week-analysis').innerHTML.includes('PFC計測不可1日'));
+    await h.edit(); setStatus(h, 'normal'); await h.save(); assert.equal(h.record().protein, 987.6); assert.equal(h.record().pfcStatus, 'normal');
+  });
+  await test('通常部分入力は未入力栄養素だけ警告し0へ補完しない', async () => {
+    const h = setup(); h.controls.protein.value = '155'; await h.save(); assert.equal(h.record().protein, 155); assert.equal(h.record().fat, null); assert.equal(h.record().carbs, null);
+    const text = h.confirmations[0].text; assert.equal(text.includes('・' + K.labels.protein), false); assert.ok(text.includes('・' + K.labels.fat)); assert.ok(text.includes('・' + K.labels.carbs));
+  });
+  for (const mode of ['merge', 'replace']) await test('旧JSON復元は計測状態喪失を確認、取消で全保持：' + mode, async () => {
+    const row = K.validateRecord({ date, pfcStatus: 'other', protein: 155 }), h = setup([row]), raw = h.getStored();
+    const old = { ...row }; delete old.pfcStatus; const text = JSON.stringify({ schemaVersion: 2, records: [old], targetHistory: [] });
+    h.answers.push(false); await restorePfc(h, text, mode); assert.ok(h.confirmations[0].text.includes('失われる記録：1件')); assert.equal(h.getStored(), raw); assert.equal(h.writes.length, 0);
+    await restorePfc(h, text, mode); assert.equal(h.record().pfcStatus, 'normal'); assert.equal(h.record().protein, 155);
+  });
+  await test('旧JSON置換でファイルにない計測不可記録を消す場合も警告', async () => {
+    const h = setup([K.validateRecord({ date, pfcStatus: 'eating_out' })]); h.answers.push(false);
+    await restorePfc(h, JSON.stringify({ schemaVersion: 1, records: [{ date: '2026-11-07', weight: 65 }] }), 'replace');
+    assert.ok(h.confirmations[0].text.includes('失われる記録：1件')); assert.equal(h.writes.length, 0);
+  });
+  await test('形式3不正状態の1件を含む復元を全拒否して既存保存と目標を保持', async () => {
+    const row = K.validateRecord({ date, pfcStatus: 'other' }), h = setup([row]), raw = h.getStored();
+    await restorePfc(h, K.backup([K.validateRecord({ date: '2026-11-07', weight: 64 }), { ...row, pfcStatus: 'unknown' }]));
+    assert.equal(h.getStored(), raw); assert.equal(h.writeAttempts.length, 0); assert.equal(h.confirmations.length, 0); assert.equal(h.getState().locked, false);
+  });
+  await test('PFC形式3の保存失敗でも旧記録・目標・編集中の保管値を保持', async () => {
+    const row = K.validateRecord({ date, pfcStatus: 'other', protein: 155 }), h = setup([row], { failRecordWrites: true }), raw = h.getStored();
+    await h.edit(); setStatus(h, 'normal'); await h.save(); assert.equal(h.getStored(), raw); assert.equal(h.controls.protein.value, 155); assert.equal(h.getState().records[0].pfcStatus, 'other');
+    await restorePfc(h, K.backup([{ ...row, pfcStatus: 'eating_out' }])); assert.equal(h.getStored(), raw); assert.equal(h.getState().records[0].pfcStatus, 'other'); assert.equal(h.getState().locked, false);
+  });
+  await test('旧形式2の起動は保存を行わず、状態を通常として編集できる', async () => {
+    const old = K.validateRecord({ date, weight: 65, bowel: '' }); delete old.pfcStatus; const raw = JSON.stringify({ schemaVersion: 2, records: [old], targetHistory: [] });
+    const h = setup([], { initialRaw: raw }); assert.equal(h.getStored(), raw); assert.equal(h.writes.length, 0); assert.equal(h.getState().records[0].pfcStatus, 'normal');
+    await h.edit(); assert.equal(h.controls.pfcStatus.value, 'normal'); assert.equal(h.controls.bowel.value, '');
+  });
+
+
+  await test('形式3復元成功と再読み込みでPFC保管値・状態・目標履歴が一致', async () => {
+    const rows = [K.validateRecord({ date, protein: 155, fat: 65, carbs: 280, pfcStatus: 'eating_out', bowel: '' })], goals = [{ effectiveFrom: date, targets: K.DEFAULT_TARGETS }];
+    const h = setup(); h.elements.get('restore-mode').value = 'replace'; h.elements.get('restore-target-mode').value = 'replace'; const text = K.backup(rows, goals);
+    await h.elements.get('restore-file').listeners.change({ target: { value: '', files: [{ size: text.length, text: async () => text }] } });
+    const stored = K.parseBackup(h.getStored()); assert.deepEqual(stored.records, rows); assert.deepEqual(stored.targetHistory, goals); assert.equal(h.getState().locked, false);
+    const reloaded = setup([], { initialRaw: h.getStored() }); assert.equal(reloaded.writes.length, 0); await reloaded.edit(); assert.equal(reloaded.controls.protein.disabled, true); assert.equal(reloaded.controls.protein.value, ''); assert.equal(reloaded.controls.bowel.value, '');
+  });
+  await test('旧小数PFCの部分保管値は切り替え編集でも丸め・補完しない', async () => {
+    const row = K.validateRecord({ date, pfcStatus: 'other', protein: 155.1234567 }), h = setup([row]);
+    await h.edit(); setStatus(h, 'normal'); setStatus(h, 'eating_out'); await h.save(); assert.equal(h.record().protein, row.protein); assert.equal(h.record().fat, null); assert.equal(h.record().carbs, null); assert.equal(h.record().pfcStatus, 'eating_out');
+  });
+  await test('不正状態や無効欄の不正PFCも保存前に拒否し既存データを保持', async () => {
+    for (const mode of ['status', 'protein']) { const h = setup([K.validateRecord({ date, weight: 65 })]), raw = h.getStored();
+      h.controls.weight.value = '64'; if (mode === 'protein') h.controls.protein.value = '-1'; setStatus(h, mode === 'status' ? 'bad' : 'other');
+      await h.save(); assert.equal(h.writes.length, 0); assert.equal(h.getStored(), raw); assert.equal(h.confirmations.length, 0);
+    }
+  });
+  await test('7日・月別平均にも計測不可理由と通常入力漏れを別表示', () => {
+    const rows = [K.validateRecord({ date, pfcStatus: 'other', protein: 987.6 }), K.validateRecord({ date: '2026-11-05', protein: 155 })], h = setup(rows);
+    h.elements.get('summary-date').value = date; h.elements.get('summary-month').value = '2026-11'; h.elements.get('summary-date').listeners.change();
+    for (const id of ['weekly-summary', 'monthly-summary']) { const html = h.elements.get(id).innerHTML; assert.ok(html.includes('PFC計測不可1日')); assert.ok(html.includes('通常全入力0日/入力漏れ1日')); assert.equal(html.includes('987.6'), false); }
+    assert.ok(h.elements.get('monthly-summary').innerHTML.includes('1日／30日'));
+  });
+
+  const stringPfcSetup = (rows = [], options) => {
+    const h = setup(rows, options);
+    // 実ブラウザのinput.valueと同様、設定値を文字列にします。
+    for (const key of K.nutrients) { let value = String(h.controls[key].value); Object.defineProperty(h.controls[key], 'value', { get() { return value; }, set(next) { value = String(next); } }); }
+    return h;
+  };
+  const assertHiddenPfc = h => { for (const key of K.nutrients) { assert.equal(h.controls[key].value, ''); assert.equal(h.controls[key].disabled, true); } assert.equal(h.elements.get('calorie-output').textContent, '対象外'); };
+  const assertPfcValues = (h, values) => { K.nutrients.forEach((key, i) => { assert.equal(h.controls[key].value, values[i]); assert.equal(h.controls[key].disabled, false); }); };
+  for (const status of ['eating_out', 'other']) for (const values of [['', '', ''], ['0', '0', '0'], ['155.5', '65.2', '280.1'], ['0', '', '210.5']]) await test('PFC非表示・復帰・保存・再読込・再編集：' + status + '／' + JSON.stringify(values), async () => {
+    const h = stringPfcSetup(); K.nutrients.forEach((key, i) => { h.controls[key].value = values[i]; });
+    setStatus(h, status); assertHiddenPfc(h);
+    setStatus(h, status); assertHiddenPfc(h); // 重複イベントで空欄を再保管しない。
+    setStatus(h, status === 'other' ? 'eating_out' : 'other'); assertHiddenPfc(h);
+    setStatus(h, 'normal'); assertPfcValues(h, values);
+    setStatus(h, status); await h.save(); const row = h.record(); assert.equal(row.pfcStatus, status);
+    K.nutrients.forEach((key, i) => assert.equal(row[key], values[i] === '' ? null : Number(values[i])));
+    assert.equal(K.calories(row), null); assert.equal(A.comparison([row], 7).metrics.protein.current.count, 0);
+    assertPfcValues(h, ['', '', '']); // 保存後の新規入力へ保管値を持ち越さない。
+    await h.edit(); assertHiddenPfc(h); await h.save(); assert.deepEqual(h.record(), row);
+    const reloaded = stringPfcSetup([], { initialRaw: h.getStored() }); assert.equal(reloaded.writes.length, 0); await reloaded.edit(); assertHiddenPfc(reloaded);
+    setStatus(reloaded, 'normal'); assertPfcValues(reloaded, values); assert.equal(K.parseBackup(reloaded.getStored()).records[0].pfcStatus, status);
+  });
+  await test('非表示の旧精密小数・部分入力は無変更保存と通常復帰でも正確に保持', async () => {
+    const row = K.validateRecord({ date, pfcStatus: 'other', protein: 155.123456789, fat: 0, carbs: null }), h = stringPfcSetup([row]);
+    await h.edit(); assertHiddenPfc(h); await h.save(); assert.deepEqual(h.record(), row);
+    await h.edit(); setStatus(h, 'normal'); assertPfcValues(h, [String(row.protein), '0', '']); await h.save(); assert.equal(h.record().protein, row.protein); assert.equal(h.record().carbs, null);
+  });
+  await test('非表示状態のJSON書き出し・復元・再編集で保管値と目標履歴を維持', async () => {
+    const row = K.validateRecord({ date, pfcStatus: 'eating_out', protein: 0, fat: 65.123456789, carbs: null }), goals = [{ effectiveFrom: date, targets: K.DEFAULT_TARGETS }];
+    const source = stringPfcSetup([], { initialRaw: K.backup([row], goals) }); await source.edit(); assertHiddenPfc(source); await source.save();
+    source.elements.get('export-json').listeners.click(); assert.ok(source.metadata.has(backupKey)); const text = K.backup(source.getState().records, source.getState().targetHistory);
+    assert.equal(JSON.parse(text).schemaVersion, 3); const target = stringPfcSetup(); target.elements.get('restore-mode').value = 'replace'; target.elements.get('restore-target-mode').value = 'replace';
+    await target.elements.get('restore-file').listeners.change({ target: { value: '', files: [{ size: text.length, text: async () => text }] } });
+    const restored = K.parseBackup(target.getStored()); assert.deepEqual(restored.records, [row]); assert.deepEqual(restored.targetHistory, goals);
+    await target.edit(); assertHiddenPfc(target); setStatus(target, 'normal'); assertPfcValues(target, ['0', String(row.fat), '']);
+  });
+  await test('非表示保存の失敗で保存済み値と入力途中の保管値を両方保持', async () => {
+    const row = K.validateRecord({ date, pfcStatus: 'normal', protein: 155 }), h = stringPfcSetup([row], { failRecordWrites: true }), raw = h.getStored();
+    await h.edit(); h.controls.protein.value = '160.5'; setStatus(h, 'other'); assertHiddenPfc(h); await h.save();
+    assert.equal(h.getStored(), raw); assertHiddenPfc(h); setStatus(h, 'normal'); assertPfcValues(h, ['160.5', '', '']); assert.equal(h.getState().records[0].protein, 155);
+  });
+  await test('編集取消・別記録編集で非表示の保管値が混ざらない', async () => {
+    const other = K.validateRecord({ date: '2026-11-07', pfcStatus: 'other', protein: 200 }), h = stringPfcSetup([K.validateRecord({ date, pfcStatus: 'other', protein: 155 }), other]);
+    await h.edit(); assertHiddenPfc(h); h.elements.get('cancel-edit').listeners.click(); assertPfcValues(h, ['', '', '']); await h.save(); assert.equal(h.writes.length, 0);
+    await h.events['document:click']({ target: { closest: selector => selector === '[data-edit]' ? { dataset: { edit: other.date } } : null } });
+    assertHiddenPfc(h); setStatus(h, 'normal'); assertPfcValues(h, ['200', '', '']); assert.equal(h.writes.length, 0);
+  });
+  await test('通常復帰後の変更・空欄化は次の非表示でも最新値を保持', async () => {
+    const h = stringPfcSetup(); h.controls.protein.value = '155'; setStatus(h, 'other'); setStatus(h, 'normal'); h.controls.protein.value = ''; h.controls.fat.value = '0';
+    setStatus(h, 'eating_out'); assertHiddenPfc(h); await h.save(); assert.equal(h.record().protein, null); assert.equal(h.record().fat, 0);
+    await h.edit(); setStatus(h, 'normal'); assertPfcValues(h, ['', '0', '']);
+  });
+  await test('解釈不能な数値入力を非表示操作で消さず通常状態で修正を案内', async () => {
+    const h = stringPfcSetup(); h.controls.protein.validity = { badInput: true }; setStatus(h, 'other'); assert.equal(h.controls.pfcStatus.value, 'normal'); assert.equal(h.controls.protein.disabled, false);
+    assert.ok(h.elements.get('form-message').textContent.includes('数値の形式')); await h.save(); assert.equal(h.writes.length, 0);
+    h.controls.protein.validity.badInput = false; h.controls.protein.value = '155'; setStatus(h, 'other'); assertHiddenPfc(h); await h.save(); assert.equal(h.record().protein, 155);
+  });
+
   return passed;
 }
 module.exports = { runTests };

@@ -1,6 +1,6 @@
 (function (root) {
   'use strict';
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   const STORAGE_KEY = 'karada-log.records.v1';
   const numbers = {
     weight: [0.1, 500], bodyFat: [0, 100], waist: [1, 300],
@@ -8,9 +8,11 @@
     sleep: [0, 24], fatigue: [1, 5], strength: [0, Number.MAX_SAFE_INTEGER], cardio: [0, Number.MAX_SAFE_INTEGER]
   };
   const texts = { alcohol: 200, memo: 10000 };
-  const fields = ['date', 'dayType', ...Object.keys(numbers), ...Object.keys(texts), 'bowel'];
+  const fields = ['date', 'dayType', ...Object.keys(numbers), ...Object.keys(texts), 'bowel', 'pfcStatus'];
+  const pfcStatuses = { normal: '通常記録', eating_out: '外食・飲み会', other: 'その他' };
+  const pfcEligible = r => r.pfcStatus === undefined || r.pfcStatus === 'normal';
   // 保存する日付は従来の記録日Dのまま。対象日は表示・集計のときだけ求めます。
-  const previousDayFields = ['dayType', 'protein', 'fat', 'carbs', 'calories', 'strength', 'cardio', 'alcohol', 'bowel'];
+  const previousDayFields = ['dayType', 'protein', 'fat', 'carbs', 'calories', 'strength', 'cardio', 'alcohol', 'bowel', 'pfcStatus'];
   const nutrients = ['protein', 'fat', 'carbs'];
   const dayTypes = ['ト', 'へき', 'きき'];
   const DEFAULT_TARGETS = {
@@ -37,8 +39,10 @@
     if (Object.keys(input).some(key => !fields.includes(key))) throw new Error('対応していない項目が含まれています。');
     if (!validDate(input.date)) throw new Error('日付が正しくありません（1900〜2100年）。');
     // 運動の自動0設定より先に検証し、日付だけの空記録を防ぎます。
-    if (!fields.some(key => key !== 'date' && input[key] != null && input[key] !== '')) throw new Error('日付以外に、少なくとも1項目を入力してください。');
-    const r = { date: input.date, dayType: input.dayType ?? '' };
+    const status = input.pfcStatus === undefined ? 'normal' : input.pfcStatus;
+    if (typeof status !== 'string' || !Object.hasOwn(pfcStatuses, status)) throw new Error('PFC計測状態が正しくありません。');
+    if (!fields.some(key => key !== 'date' && !(key === 'pfcStatus' && status === 'normal') && input[key] != null && input[key] !== '')) throw new Error('日付以外に、少なくとも1項目を入力してください。');
+    const r = { date: input.date, dayType: input.dayType ?? '', pfcStatus: status };
     if (!['', 'ト', 'へき', 'きき'].includes(r.dayType)) throw new Error('日種別が正しくありません。');
     for (const [key, [min, max]] of Object.entries(numbers)) {
       const value = input[key];
@@ -58,11 +62,11 @@
     return r;
   }
   function calories(r) {
-    return ['protein', 'fat', 'carbs'].every(key => typeof r[key] === 'number' && Number.isFinite(r[key]))
+    return pfcEligible(r) && ['protein', 'fat', 'carbs'].every(key => typeof r[key] === 'number' && Number.isFinite(r[key]))
       ? r.protein * 4 + r.fat * 9 + r.carbs * 4 : null;
   }
   function mean(records, field) {
-    const values = records.map(r => field === 'calories' ? calories(r) : r[field]).filter(v => typeof v === 'number' && Number.isFinite(v));
+    const values = records.filter(r => ![...nutrients, 'calories'].includes(field) || pfcEligible(r)).map(r => field === 'calories' ? calories(r) : r[field]).filter(v => typeof v === 'number' && Number.isFinite(v));
     return { value: values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null, count: values.length };
   }
   function targetDate(record, field) {
@@ -102,11 +106,14 @@
   function parseBackup(text) {
     let data;
     try { data = JSON.parse(text); } catch { throw new Error('JSONを読み取れませんでした。バックアップファイルを選んでください。'); }
-    if (!data || ![1, 2].includes(data.schemaVersion) || !Array.isArray(data.records)) throw new Error('対応するからだ記録のJSONバックアップではありません。');
+    if (!data || ![1, 2, 3].includes(data.schemaVersion) || !Array.isArray(data.records)) throw new Error('対応するからだ記録のJSONバックアップではありません。');
     if (data.records.length > 50000) throw new Error('記録が多すぎます（上限50,000件）。');
     const warnings = [];
     const records = data.records.map(input => {
-      if (data.schemaVersion === 2) return validateRecord(input, { preserveUnknownExercise: true });
+      if (data.schemaVersion >= 2) {
+        if (data.schemaVersion === 3 && (!input || !Object.hasOwn(input, 'pfcStatus'))) throw new Error('PFC計測状態が含まれていません。');
+        return validateRecord(input, { preserveUnknownExercise: true });
+      }
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('旧記録の形式が正しくありません。');
       const r = { ...input };
       for (const key of ['breakfast', 'lunch', 'dinner']) delete r[key];
@@ -137,7 +144,7 @@
     date: '記録日D', dayType: '日種別（前日）', weight: '体重(kg)', bodyFat: '体脂肪率(%)', waist: 'ウエスト(cm)',
     protein: 'タンパク質P(g)', fat: '脂質F(g)', carbs: '炭水化物C(g)', sleep: '睡眠時間(h)', fatigue: '疲労度(1〜5)',
     strength: '筋トレ時間(分)',
-    cardio: '有酸素運動(分)', alcohol: 'アルコール', memo: '自由メモ', bowel: '便通'
+    cardio: '有酸素運動(分)', alcohol: 'アルコール', memo: '自由メモ', bowel: '便通', pfcStatus: 'PFC計測状態（前日）'
   };
   function csv(records) {
     // 表計算ソフトが自由記述を数式として実行することを防ぎます。
@@ -147,10 +154,10 @@
       return '"' + s.replace(/"/g, '""') + '"';
     };
     const rows = [[...fields.map(key => labels[key]), '摂取カロリー(kcal)'],
-      ...[...records].sort((a, b) => a.date.localeCompare(b.date)).map(r => [...fields.map(key => r[key]), calories(r)])];
+      ...[...records].sort((a, b) => a.date.localeCompare(b.date)).map(r => [...fields.map(key => key === 'pfcStatus' ? pfcStatuses[r[key] ?? 'normal'] : nutrients.includes(key) && !pfcEligible(r) ? null : r[key]), calories(r)])];
     return '\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n');
   }
-  const api = { SCHEMA_VERSION, STORAGE_KEY, numbers, texts, fields, labels, validDate, today, shiftDate, targetDate, previousDayFields, nutrients, dayTypes, DEFAULT_TARGETS, validateTargets, validateHistory, targetsAt, validateRecord, calories, mean, range, monthRange, parseBackup, backup, mergeRecords, csv };
+  const api = { SCHEMA_VERSION, STORAGE_KEY, numbers, texts, fields, labels, pfcStatuses, pfcEligible, validDate, today, shiftDate, targetDate, previousDayFields, nutrients, dayTypes, DEFAULT_TARGETS, validateTargets, validateHistory, targetsAt, validateRecord, calories, mean, range, monthRange, parseBackup, backup, mergeRecords, csv };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Karada = Object.freeze(api);
 })(globalThis);

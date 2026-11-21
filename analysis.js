@@ -14,7 +14,7 @@
   function achievement(records, history, start, end) {
     const result = {};
     for (const type of K.dayTypes) {
-      const rows = between(records, start, end, 'dayType').filter(r => r.dayType === type), group = {};
+      const rows = between(records, start, end, 'dayType').filter(r => r.dayType === type && K.pfcEligible(r)), group = {};
       for (const key of K.nutrients) {
         let valid = 0, achieved = 0, under = 0, over = 0, underGrams = 0, overGrams = 0;
         for (const r of rows) {
@@ -34,6 +34,15 @@
     return result;
   }
   function latestDate(records) { return records.length ? records.reduce((d, r) => r.date > d ? r.date : d, records[0].date) : null; }
+  function pfcCounts(records, start, end) {
+    const rows = between(records, start, end, 'pfcStatus'), normal = rows.filter(K.pfcEligible);
+    const eatingOut = rows.filter(r => r.pfcStatus === 'eating_out').length, other = rows.filter(r => r.pfcStatus === 'other').length;
+    return { expected: dayCount(start, end), recorded: rows.length, eatingOut, other, unavailable: eatingOut + other,
+      normalComplete: normal.filter(r => K.nutrients.every(key => r[key] != null)).length,
+      normalIncomplete: normal.filter(r => K.nutrients.some(key => r[key] == null)).length,
+      missing: dayCount(start, end) - rows.length };
+  }
+  function pfcCountText(s) { return `PFC計測不可${s.unavailable}日(外食・飲み会${s.eatingOut}/その他${s.other})、通常全入力${s.normalComplete}日/入力漏れ${s.normalIncomplete}日、記録なし${s.missing}日`; }
   function monday(date) { const day = new Date(date + 'T00:00:00Z').getUTCDay(); return K.shiftDate(date, -((day + 6) % 7)); }
   function comparison(records, days, latest = latestDate(records)) {
     if (!latest) return null;
@@ -46,6 +55,7 @@
       const diff = ['strength', 'cardio'].includes(field) ? (current.total == null || previous.total == null ? null : current.total - previous.total) : (current.value == null || previous.value == null ? null : current.value - previous.value);
       (['strength', 'cardio'].includes(field) ? result.exercise : result.metrics)[field] = { current, previous, diff };
     }
+    result.pfc = { current: pfcCounts(records, result.metrics.protein.current.start, result.metrics.protein.current.end), previous: pfcCounts(records, result.metrics.protein.previous.start, result.metrics.protein.previous.end) };
     return result;
   }
   function weekStats(records, history, start, latest, complete) {
@@ -54,6 +64,7 @@
     for (const field of metrics) result.metrics[field] = stat(records, field, start, K.previousDayFields.includes(field) ? foodEnd : bodyEnd);
     for (const field of ['strength', 'cardio']) result.exercise[field] = exercise(records, field, start, foodEnd);
     result.achievement = achievement(records, history, start, foodEnd);
+    result.pfc = pfcCounts(records, start, foodEnd);
     return result;
   }
   function weekly(records, history, latest = latestDate(records)) {
@@ -96,15 +107,16 @@
   function textGoals(targets) { return K.dayTypes.map(type => type + ' ' + K.nutrients.map(key => ({ protein: 'P', fat: 'F', carbs: 'C' }[key]) + textNumber(targets[type][key].min) + '〜' + textNumber(targets[type][key].max) + 'g').join('/')).join('、'); }
   function analysisText(records, history) {
     const a = analysis(records, history); if (!a.latest) return null;
-    const lines = ['からだ記録・分析用データ', `分析基準日（最新記録日D）：${a.latest}`, '身体・睡眠・疲労はD、日種別・食事・活動はD−1。—はデータなし。未記録を0補完しない。', '有効n/N日＝有効記録日数/対象日数。70%未満は記録不足・参考値。差＝直近−前期間。', 'PFC達成%は達成/判定可能日数（上下限を含む）。100%(1/1日)でも記録充足1/7日は参考値。未入力・日種別未選択は判定から除外。不足・超過0日の平均gは該当なし。', '運動は実施日数・合計分・実施日平均。今週の合計・日数を完了週と単純比較しない。', '【直近7暦日の日別詳細】', '記録日D|食事・活動日D−1|日種別|体重kg|体脂肪%|ウエストcm|Pg|Fg|Cg|kcal|筋トレ分|有酸素分|睡眠h|疲労1〜5|酒|便通'];
+    const lines = ['からだ記録・分析用データ', `分析基準日（最新記録日D）：${a.latest}`, '身体・睡眠・疲労はD、日種別・食事・活動はD−1。—はデータなし。未記録を0補完しない。', '有効n/N日＝有効記録日数/対象暦日数（計測不可日も含む）。70%未満は記録不足・参考値。差＝直近−前期間。', 'PFC達成%は達成/判定可能日数（上下限を含む）。100%(1/1日)でも記録充足1/7日は参考値。計測不可は保管PFCも平均・判定から除外。未入力・日種別未選択は判定から除外。不足・超過0日の平均gは該当なし。', '運動は実施日数・合計分・実施日平均。今週の合計・日数を完了週と単純比較しない。', '【直近7暦日の日別詳細】', '記録日D|食事・活動日D−1|日種別|体重kg|体脂肪%|ウエストcm|Pg|Fg|Cg|kcal|筋トレ分|有酸素分|睡眠h|疲労1〜5|酒|便通|PFC計測状態'];
     const map = new Map(records.map(r => [r.date, r]));
     for (let i = 6; i >= 0; i--) {
       const date = K.shiftDate(a.latest, -i), r = map.get(date), prefix = `${date}|${K.shiftDate(date, -1)}`;
-      lines.push(r ? prefix + '|' + [r.dayType || '未選択', ...['weight', 'bodyFat', 'waist', 'protein', 'fat', 'carbs'].map(key => textNumber(r[key])), textNumber(K.calories(r)), textNumber(r.strength), textNumber(r.cardio), textNumber(r.sleep), textNumber(r.fatigue), r.alcohol || '未入力', r.bowel || '未入力'].map(textCell).join('|') : prefix + '|未記録');
+      lines.push(r ? prefix + '|' + [r.dayType || '未選択', ...['weight', 'bodyFat', 'waist', 'protein', 'fat', 'carbs'].map(key => K.nutrients.includes(key) && !K.pfcEligible(r) ? '対象外' : textNumber(r[key])), K.pfcEligible(r) ? textNumber(K.calories(r)) : '対象外', textNumber(r.strength), textNumber(r.cardio), textNumber(r.sleep), textNumber(r.fatigue), r.alcohol || '未入力', r.bowel || '未入力'].map(textCell).join('|') + `|${K.pfcStatuses[r.pfcStatus ?? 'normal']}` : prefix + '|未記録');
     }
     lines.push('【7・14・28日比較】');
     for (const c of a.comparisons) {
       const body = c.metrics.weight, food = c.metrics.protein;
+      lines.push(`直近：${pfcCountText(c.pfc.current)}／前期間：${pfcCountText(c.pfc.previous)}`);
       lines.push(`${c.days}日比較：身体 ${body.current.start}〜${body.current.end}／前 ${body.previous.start}〜${body.previous.end}、食事・活動 ${food.current.start}〜${food.current.end}／前 ${food.previous.start}〜${food.previous.end}`);
       const previousEmpty = [...Object.values(c.metrics), ...Object.values(c.exercise)].every(s => !s.previous.count);
       if (previousEmpty) lines.push(`前期間は全数値項目データなし（各0/${c.days}日）。差は全項目比較不可。以下は直近平均|有効日数・注意。`);
@@ -124,6 +136,7 @@
       lines.push(w.complete ? '前週比：' + ['weight', 'bodyFat', 'waist'].map(key => textNames[key] + ' ' + (w.deltas[key] == null ? '比較不可' : textNumber(w.deltas[key]))).join('、') : '前週比：途中経過のため比較不可');
       for (const [key, s] of Object.entries(w.exercise)) lines.push(`${key === 'strength' ? '筋トレ' : '有酸素'}：${textExercise(s)}`);
       lines.push(textAchievement(w.achievement));
+      lines.push(pfcCountText(w.pfc));
     }
     lines.push('【PFC目標履歴・適用期間】', `初期（${history.length ? '〜' + K.shiftDate(history[0].effectiveFrom, -1) : '変更前の全期間'}、食事実施日）：${textGoals(K.DEFAULT_TARGETS)}`);
     history.forEach((h, i) => lines.push(`${h.effectiveFrom}〜${history[i + 1] ? K.shiftDate(history[i + 1].effectiveFrom, -1) : '以後'}：${textGoals(h.targets)}`));
@@ -132,6 +145,6 @@
     lines.push('【分析依頼】', requestText);
     return lines.join('\n');
   }
-  const api = { metrics, dayCount, between, quality, stat, exercise, achievement, latestDate, monday, comparison, weekStats, weekly, analysis, analysisText };
+  const api = { metrics, dayCount, between, quality, stat, exercise, achievement, pfcCounts, pfcCountText, latestDate, monday, comparison, weekStats, weekly, analysis, analysisText };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.KaradaAnalysis = Object.freeze(api);
 })(globalThis);

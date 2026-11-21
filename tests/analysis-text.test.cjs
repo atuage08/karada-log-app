@@ -78,6 +78,14 @@ function runTests() {
   test('0件コピー不可と入力データ非変更を維持', () => {
     assert.equal(A.analysisText([], []), null); const rows = Object.freeze([Object.freeze({ ...sample })]); const before = JSON.stringify(rows); A.analysisText(rows, []); assert.equal(JSON.stringify(rows), before);
   });
+
+  test('分析コピーは計測不可理由・件数を出し保管値を実績として出さない', () => {
+    const row = K.validateRecord({ ...sample, pfcStatus: 'eating_out', protein: 987.6, fat: 876.5, carbs: 765.4 });
+    const text = A.analysisText([row], []); for (const value of ['987.6', '876.5', '765.4', String(987.6 * 4 + 876.5 * 9 + 765.4 * 4), sample.memo]) assert.equal(text.includes(value), false);
+    assert.ok(text.includes('|対象外|対象外|対象外|対象外|')); assert.ok(text.includes('|外食・飲み会'));
+    assert.ok(text.includes('PFC計測不可1日(外食・飲み会1/その他0)')); assert.ok(text.includes('通常全入力0日/入力漏れ0日、記録なし6日')); assert.ok(text.includes('PFC判定なし'));
+  });
+
   return passed;
 }
 module.exports = { runTests, fixture };

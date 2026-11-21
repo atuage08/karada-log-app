@@ -13,6 +13,7 @@
   let targetHistory = [], migrationWarnings = [];
   const backupTimeKey = 'karada-log.backup.last-json-export.v1';
   let editingRecord = null, editTimeValues = null, editNumberValues = null;
+  let hiddenPfc = null;
   const decimalFields = ['weight', 'bodyFat', 'waist', 'protein', 'fat', 'carbs'];
   const number = value => value == null ? '—' : value.toLocaleString('ja-JP', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
   const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -84,6 +85,8 @@
     const values = Object.fromEntries(new FormData(form));
     // disabledの旧アルコール欄も、保存値を保持する判断に使います。
     values.alcohol = form.elements.alcohol.value;
+    // 非表示・disabledの欄はFormDataではなく、保管した入力値から保存します。
+    for (const key of K.nutrients) values[key] = hiddenPfc ? hiddenPfc[key] : form.elements[key].value;
     for (const control of Object.values(form.elements)) {
       if (control.validity?.badInput) throw new Error('数値の形式が正しくありません。入力内容を確認してください。');
     }
@@ -100,8 +103,8 @@
     };
     const strength = timeValue('strength'), sleep = timeValue('sleep', true);
     for (const key of ['strengthHours', 'strengthMinutes', 'sleepHours', 'sleepMinutes']) delete values[key];
-    // 初期値「なし」と運動の自動0だけで空の記録ができることを防ぎます。
-    const explicitInput = Object.entries(values).some(([key, value]) => !['date', 'alcohol'].includes(key) && (key === 'memo' ? value.trim() !== '' : value !== '')) || values.alcohol === 'あり' || ['strengthHours', 'strengthMinutes', 'sleepHours', 'sleepMinutes'].some(key => form.elements[key].value !== '');
+    // アルコール・便通・計測状態の初期値と運動の自動0だけでは保存しません。
+    const explicitInput = Object.entries(values).some(([key, value]) => !['date', 'alcohol', 'bowel', 'pfcStatus'].includes(key) && (key === 'memo' ? value.trim() !== '' : value !== '')) || values.alcohol === 'あり' || values.bowel === 'なし' || values.pfcStatus !== 'normal' || ['strengthHours', 'strengthMinutes', 'sleepHours', 'sleepMinutes'].some(key => form.elements[key].value !== '');
     if (!editingRecord && !explicitInput) throw new Error('日付と初期値以外に、少なくとも1項目を入力してください。');
     if (!['なし', 'あり'].includes(values.alcohol)) throw new Error('アルコールは「なし」「あり」から選んでください。');
     if (editingRecord && !['なし', 'あり'].includes(editingRecord.alcohol) && !$('replace-alcohol').checked) values.alcohol = editingRecord.alcohol;
@@ -150,15 +153,40 @@
     $('sleep-date').textContent = valid ? `${dateLabel(previous)} 夜 〜 ${dateLabel(date)} 朝` : '記録日の前夜から当日朝まで';
   }
   function updateCalories() {
-    const values = {};
+    const values = { pfcStatus: form.elements.pfcStatus.value };
     for (const key of ['protein', 'fat', 'carbs']) values[key] = form.elements[key].value === '' ? null : Number(form.elements[key].value);
-    $('calorie-output').textContent = number(K.calories(values));
+    $('calorie-output').textContent = K.pfcEligible(values) ? number(K.calories(values)) : '対象外';
+  }
+  function updatePfcStatus() {
+    const status = form.elements.pfcStatus.value;
+    if (status !== 'normal' && !hiddenPfc) {
+      // number欄の解釈不能な入力はvalueから保管できないため、修正を求めます。
+      if (K.nutrients.some(key => form.elements[key].validity?.badInput)) {
+        form.elements.pfcStatus.value = 'normal';
+        message('form-message', 'PFCの数値の形式を確認してから、計測状態を変更してください。', true);
+        updateCalories();
+        return;
+      }
+      hiddenPfc = Object.fromEntries(K.nutrients.map(key => [key, form.elements[key].value]));
+    }
+    if (status === 'normal' && hiddenPfc) {
+      for (const key of K.nutrients) form.elements[key].value = hiddenPfc[key];
+      hiddenPfc = null;
+    }
+    if (status !== 'normal') for (const key of K.nutrients) form.elements[key].value = '';
+    for (const key of K.nutrients) form.elements[key].disabled = status !== 'normal';
+    $('pfc-status-summary').textContent = `PFC計測状態：${K.pfcStatuses[status] ?? '状態を選んでください'}`;
+    $('pfc-status-note').textContent = status === 'normal' ? '計測できない日だけ選んでください。' : 'PFC・カロリー・達成率は集計対象外です。数値は非表示にして内部に保管し、通常記録に戻すと再表示・集計されます。';
+    updateCalories();
   }
   function resetForm() {
+    hiddenPfc = null;
     form.reset(); form.elements.date.value = K.today(); form.elements.date.readOnly = false;
     editingDate = null; editingRecord = null; editTimeValues = null; editNumberValues = null;
     $('legacy-sleep-choice').hidden = true; $('clear-legacy-sleep').checked = false;
     form.elements.alcohol.value = 'なし'; form.elements.alcohol.disabled = false;
+    form.elements.bowel.value = 'あり'; form.elements.pfcStatus.value = 'normal';
+    $('pfc-status-details').open = false; updatePfcStatus();
     $('legacy-alcohol').hidden = true; $('replace-alcohol').checked = false; $('sleep-edit-note').hidden = true;
     $('cancel-edit').hidden = true; $('editing-note').hidden = true;
     $('exercise-edit-note').hidden = true;
@@ -192,10 +220,10 @@
     $('exercise-edit-note').hidden = record.cardio != null && record.strength != null;
     $('cancel-edit').hidden = false; $('editing-note').hidden = false;
     $('editing-note').textContent = `${dateLabel(date)} の記録を編集中です。日付は固定です。保存するまで変更は反映されません。`;
-    $('save-button').textContent = '変更を保存'; updateCalories(); updateRecordDates(); navigate('record');
+    $('save-button').textContent = '変更を保存'; updatePfcStatus(); updateRecordDates(); navigate('record');
   }
-  function averageTable(selectRecords, valueHeading, expected) {
-    return `<table><thead><tr><th scope="col">項目</th><th scope="col">${valueHeading}</th><th scope="col">日付の基準</th><th scope="col">記録日数</th><th scope="col">記録状況</th></tr></thead><tbody>${metrics.map(([key, label, unit]) => {
+  function averageTable(selectRecords, valueHeading, expected, foodStart, foodEnd) {
+    return `<p class="help">${window.KaradaAnalysis.pfcCountText(window.KaradaAnalysis.pfcCounts(selectRecords('pfcStatus'), foodStart, foodEnd))}</p><table><thead><tr><th scope="col">項目</th><th scope="col">${valueHeading}</th><th scope="col">日付の基準</th><th scope="col">記録日数</th><th scope="col">記録状況</th></tr></thead><tbody>${metrics.map(([key, label, unit]) => {
       const result = K.mean(selectRecords(key), key);
       const basis = K.previousDayFields.includes(key) ? '食事・活動の実施日（D−1）' : '当日朝（D）';
       return `<tr><th scope="row">${label}</th><td>${key === 'sleep' ? window.KaradaAnalysisUI.formatSleep(result.value) : (result.count ? number(result.value) : 'データなし') + ' ' + unit}</td><td>${basis}</td><td>${result.count}日／${expected}日</td><td>${window.KaradaAnalysis.quality(result.count, expected)}</td></tr>`;
@@ -211,9 +239,9 @@
     }).join('');
     renderChart(end);
     const month = /^\d{4}-(0[1-9]|1[0-2])$/.test($('summary-month').value) ? $('summary-month').value : end.slice(0, 7);
-    $('weekly-summary').innerHTML = averageTable(key => K.range(records, K.previousDayFields.includes(key) ? K.shiftDate(end, -1) : end, 7, key), '7日間の平均', 7);
+    $('weekly-summary').innerHTML = averageTable(key => K.range(records, K.previousDayFields.includes(key) ? K.shiftDate(end, -1) : end, 7, key), '7日間の平均', 7, K.shiftDate(end, -7), K.shiftDate(end, -1));
     const monthDays = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
-    $('monthly-summary').innerHTML = averageTable(key => K.monthRange(records, month, key), '月の平均', monthDays);
+    $('monthly-summary').innerHTML = averageTable(key => K.monthRange(records, month, key), '月の平均', monthDays, month + '-01', month + '-' + monthDays);
   }
   function renderChart(end) {
     const key = $('chart-metric').value, days = Number($('chart-period').value);
@@ -263,15 +291,16 @@
     const month = $('history-month').value;
     const filtered = [...records].filter(r => !month || r.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date));
     $('history-count').textContent = `${filtered.length}件の記録${month ? '（' + month.replace('-', '年') + '月）' : ''}`;
+    $('history-count').textContent += `／表示中のPFC計測不可${filtered.filter(r => !K.pfcEligible(r)).length}件（外食・飲み会${filtered.filter(r => r.pfcStatus === 'eating_out').length}／その他${filtered.filter(r => r.pfcStatus === 'other').length}）`;
     $('load-more').hidden = filtered.length <= historyLimit;
     if (!filtered.length) {
       $('history-list').innerHTML = '<div class="empty-state"><span class="empty-symbol" aria-hidden="true">▤</span><h3>この期間の記録はまだありません。</h3><p>毎日の小さな記録を、ここに残していきましょう。</p><button class="button primary" data-go="record">記録する</button></div>'; return;
     }
     $('history-list').innerHTML = filtered.slice(0, historyLimit).map(r => {
-      const detailKeys = ['protein', 'fat', 'carbs', 'sleep', 'fatigue', 'strength', 'cardio', 'alcohol', 'bowel'];
+      const detailKeys = ['pfcStatus', 'protein', 'fat', 'carbs', 'sleep', 'fatigue', 'strength', 'cardio', 'alcohol', 'bowel'];
       const previous = K.shiftDate(r.date, -1);
-      const detail = detailKeys.map(key => `<div><dt>${key === 'sleep' ? '睡眠時間' : K.labels[key]}<span class="field-date">${key === 'sleep' ? `${previous}夜〜${r.date}朝` : K.targetDate(r, key) + (key === 'fatigue' ? ' 起床時' : '')}</span></dt><dd>${key === 'sleep' ? window.KaradaAnalysisUI.formatSleep(r[key]) : r[key] == null && ['cardio', 'strength'].includes(key) ? '時間未確定（集計対象外）' : escape(r[key] ?? '') || '—'}</dd></div>`).join('');
-      return `<article class="card history-card"><div class="history-top"><h2 class="history-date">記録日：${dateLabel(r.date)}${r.dayType ? `<span class="day-badge">${escape(r.dayType)}</span>` : ''}</h2><div class="button-row"><button class="button secondary" data-edit="${r.date}" aria-label="${r.date}の記録を編集">編集</button><button class="button danger-button" data-delete="${r.date}" aria-label="${r.date}の記録を削除">削除</button></div></div><p class="help">当日朝の測定・疲労度：${r.date}<br>前日の食事・活動：${previous}<br>睡眠：${previous} 夜 〜 ${r.date} 朝</p><div class="history-metrics">${metrics.slice(0, 4).map(([key, label, unit]) => `<div><span>${label}（${key === 'calories' ? '前日分' : '当日朝'}）</span>${number(key === 'calories' ? K.calories(r) : r[key])} <small>${unit}</small></div>`).join('')}</div><details><summary>すべての項目を見る</summary><dl class="history-details">${detail}</dl><p class="history-memo">${escape(r.memo) || 'メモはありません。'}</p></details></article>`;
+      const detail = detailKeys.map(key => `<div><dt>${key === 'sleep' ? '睡眠時間' : K.labels[key]}<span class="field-date">${key === 'sleep' ? `${previous}夜〜${r.date}朝` : K.targetDate(r, key) + (key === 'fatigue' ? ' 起床時' : '')}</span></dt><dd>${key === 'pfcStatus' ? escape(K.pfcStatuses[r[key] ?? 'normal']) : K.nutrients.includes(key) && !K.pfcEligible(r) ? '対象外' : key === 'sleep' ? window.KaradaAnalysisUI.formatSleep(r[key]) : r[key] == null && ['cardio', 'strength'].includes(key) ? '時間未確定（集計対象外）' : escape(r[key] ?? '') || '—'}</dd></div>`).join('');
+      return `<article class="card history-card"><div class="history-top"><h2 class="history-date">記録日：${dateLabel(r.date)}${r.dayType ? `<span class="day-badge">${escape(r.dayType)}</span>` : ''}</h2><div class="button-row"><button class="button secondary" data-edit="${r.date}" aria-label="${r.date}の記録を編集">編集</button><button class="button danger-button" data-delete="${r.date}" aria-label="${r.date}の記録を削除">削除</button></div></div><p class="help">当日朝の測定・疲労度：${r.date}<br>前日の食事・活動：${previous}／PFC：${escape(K.pfcStatuses[r.pfcStatus ?? 'normal'])}<br>睡眠：${previous} 夜 〜 ${r.date} 朝</p><div class="history-metrics">${metrics.slice(0, 4).map(([key, label, unit]) => `<div><span>${label}（${key === 'calories' ? '前日分' : '当日朝'}）</span>${key === 'calories' && !K.pfcEligible(r) ? '対象外' : number(key === 'calories' ? K.calories(r) : r[key])} <small>${unit}</small></div>`).join('')}</div><details><summary>すべての項目を見る</summary><dl class="history-details">${detail}</dl><p class="history-memo">${escape(r.memo) || 'メモはありません。'}</p></details></article>`;
     }).join('');
   }
   function render() {
@@ -309,6 +338,7 @@
     }
   });
   form.addEventListener('input', updateCalories);
+  form.elements.pfcStatus.addEventListener('change', updatePfcStatus);
   form.elements.date.addEventListener('input', updateRecordDates);
   form.elements.date.addEventListener('change', updateRecordDates);
   form.addEventListener('submit', async event => {
@@ -317,7 +347,7 @@
     try { record = formRecord(); } catch (error) { message('form-message', error.message, true); return; }
     pending = true;
     try {
-      const missing = ['dayType', 'weight', 'bodyFat', 'waist', 'protein', 'fat', 'carbs', 'sleep', 'fatigue', 'bowel'].filter(key => record[key] == null || record[key] === '');
+      const missing = ['dayType', 'weight', 'bodyFat', 'waist', 'protein', 'fat', 'carbs', 'sleep', 'fatigue', 'bowel'].filter(key => (!K.nutrients.includes(key) || K.pfcEligible(record)) && (record[key] == null || record[key] === ''));
       if (missing.length && !await confirmAction('未入力の項目があります', '以下は未記録として保存されます。\n' + missing.map(key => '・' + K.labels[key]).join('\n'), 'このまま保存する', false, '入力画面に戻る')) return;
       if (records.some(r => r.date === record.date) && !await confirmAction('この日の記録を上書きしますか？', `${dateLabel(record.date)} の保存済み記録を、今の入力内容で置き換えます。\n空欄にした項目も、未記録に変わります。`, '上書きして保存')) return;
       if (persist(K.mergeRecords(records, [record]))) {
@@ -365,7 +395,9 @@
         : `${incoming.length}件を読み込みます。新規${incoming.length - conflicts}件、同じ日付の上書き${conflicts}件です。ファイルにない日の記録は残ります。`;
       const targetDescription = targetMode === 'keep' ? `目標履歴${targetHistory.length}件は保持します。` : targetMode === 'replace' ? `目標履歴${targetHistory.length}件をファイルの${nextTargets.length}件に置き換えます。0件なら初期目標に戻ります。` : `目標履歴を追加し、計${nextTargets.length}件にします。`;
       const unknownExercise = incoming.filter(r => r.cardio == null || r.strength == null).length;
-      if (await confirmAction('この内容で復元しますか？', description + '\n' + targetDescription + (unknownExercise ? `\n運動時間が未確定の記録：${unknownExercise}件。旧有酸素の文章があればメモに保管します。` : '') + '\n今の記録のJSONバックアップは保存しましたか？', '確認して復元', mode === 'replace' || conflicts > 0 || targetMode === 'replace')) {
+      const lostStatuses = records.filter(r => !K.pfcEligible(r) && (mode === 'replace' ? !incoming.some(n => n.date === r.date && !K.pfcEligible(n)) : incoming.some(n => n.date === r.date && K.pfcEligible(n)))).length;
+      const statusWarning = parsed.sourceVersion < 3 ? `\n旧JSONの計測状態がない記録は通常記録になります。今回の復元で既存の計測不可状態が失われる記録：${lostStatuses}件。` : '';
+      if (await confirmAction('この内容で復元しますか？', description + '\n' + targetDescription + statusWarning + (unknownExercise ? `\n運動時間が未確定の記録：${unknownExercise}件。旧有酸素の文章があればメモに保管します。` : '') + '\n今の記録のJSONバックアップは保存しましたか？', '確認して復元', mode === 'replace' || conflicts > 0 || targetMode === 'replace')) {
         const next = mode === 'replace' ? incoming : K.mergeRecords(records, incoming);
         saved = persist(next, nextTargets);
         if (!saved) {
