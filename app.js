@@ -346,6 +346,7 @@
     event.target.value = '';
     if (!file || locked || pending) return;
     pending = true;
+    let saved = false;
     try {
       if (file.size > 20 * 1024 * 1024) throw new Error('ファイルが大きすぎます。20MB以下のJSONを選んでください。');
       const parsed = K.parseBackup(await file.text()), incoming = parsed.records;
@@ -358,10 +359,23 @@
       const unknownExercise = incoming.filter(r => r.cardio == null || r.strength == null).length;
       if (await confirmAction('この内容で復元しますか？', description + '\n' + targetDescription + (unknownExercise ? `\n運動時間が未確定の記録：${unknownExercise}件。旧有酸素の文章があればメモに保管します。` : '') + '\n今の記録のJSONバックアップは保存しましたか？', '確認して復元', mode === 'replace' || conflicts > 0 || targetMode === 'replace')) {
         const next = mode === 'replace' ? incoming : K.mergeRecords(records, incoming);
-        if (persist(next, nextTargets)) { migrationWarnings = parsed.warnings; resetForm(); render(); message('backup-message', `${incoming.length}件を復元しました。現在の記録は${next.length}件です。目標履歴${targetHistory.length}件。`); toast('JSONから復元しました。'); }
-        else message('backup-message', '復元内容を保存できませんでした。今の保存済み記録は保持されています。', true);
+        saved = persist(next, nextTargets);
+        if (!saved) {
+          message('backup-message', '復元内容を保存できませんでした。保存済みの記録はそのままです。', true);
+          return;
+        }
+        migrationWarnings = parsed.warnings;
+        resetForm();
+        render();
+        message('backup-message', `${incoming.length}件を復元しました。現在の記録は${next.length}件です。目標履歴${targetHistory.length}件。`);
+        toast('JSONから復元しました。');
       } else message('backup-message', '復元を中止しました。記録は変更していません。');
-    } catch (error) { message('backup-message', `復元できませんでした。${error.message} 記録は変更していません。`, true); }
+    } catch (error) {
+      const detail = saved
+        ? '復元データは保存されましたが、画面を更新できませんでした。ページを再読み込みして、記録を確認してください。'
+        : `復元できませんでした。${error.message} 保存済みの記録はそのままです。`;
+      message('backup-message', detail, true);
+    }
     finally { pending = false; }
   });
   $('delete-all').addEventListener('click', async () => {
