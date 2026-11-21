@@ -83,7 +83,7 @@ async function runTests() {
     const text = A.analysisText([K.validateRecord({ date, weight: 65, alcohol })], []);
     const row = text.split('\n').find(line => line.startsWith(date + '|'));
     const encoded = '\\\\n\\r\\n\\|\\\\\\|<svg onload=alert(1)>';
-    assert.ok(row.endsWith('|' + encoded + '|未入力'));
+    assert.ok(row.endsWith('|' + encoded + '|未入力|通常記録'));
     assert.equal(row.includes('\r'), false);
     // エスケープを逆変換して、元の文字列が曖昧さなく戻ることも確認。
     const decoded = encoded.replace(/\\([\\rn|])/g, (_, ch) => ({ r: '\r', n: '\n', '\\': '\\', '|': '|' }[ch]));
@@ -94,7 +94,7 @@ async function runTests() {
     h.controls.date.value = date; h.controls.weight.value = '65';
     await h.form.listeners.submit({ preventDefault() {} });
     assert.equal(h.writes.length, 1); assert.equal(K.parseBackup(h.getStored()).records[0].weight, 65);
-    assert.equal(JSON.parse(h.getStored()).schemaVersion, 2);
+    assert.equal(JSON.parse(h.getStored()).schemaVersion, 3);
     assert.equal(get('chart-container').children[0].tagName, 'svg');
     const history = K.validateHistory([{ effectiveFrom: previous, targets: K.DEFAULT_TARGETS }]);
     const backup = K.backup(rows, history);

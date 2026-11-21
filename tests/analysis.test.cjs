@@ -24,6 +24,35 @@ function runTests() {
   test('コピーは7暦日・欠損日を残し、自由メモと食事時刻を含まない', () => { const text = A.analysisText([r('2026-11-02', { memo: '絶対に出さない秘密のメモ', alcohol: 'なし' }), r('2026-10-20')], []); assert.ok(text.includes('2026-10-27')); assert.ok(text.includes('未記録')); assert.ok(text.includes('食事・活動日D−1')); assert.ok(text.includes('①進捗評価')); assert.ok(text.includes('28')); assert.equal(text.includes('絶対に出さない秘密のメモ'), false); assert.equal(text.includes('breakfast'), false); });
   test('0件では分析コピー不可・9週の空表を捏造しない', () => { assert.equal(A.analysisText([], []), null); assert.deepEqual(A.analysis([], []).weeks, []); });
   test('集計は元データを変更しない', () => { const rows = Object.freeze([Object.freeze(r('2026-11-02', { dayType: 'ト', protein: 155 }))]); const before = JSON.stringify(rows); A.analysisText(rows, []); assert.equal(JSON.stringify(rows), before); });
+
+  test('計測不可はPFCとカロリーのみ除外・他項目は集計', () => {
+    const rows = [K.validateRecord({ date: '2026-11-03', dayType: 'ト', protein: 155, fat: 65, carbs: 280, weight: 65, sleep: 7, strength: 30, pfcStatus: 'eating_out' })];
+    const c = A.comparison(rows, 7); for (const key of [...K.nutrients, 'calories']) { assert.equal(c.metrics[key].current.count, 0); assert.equal(c.metrics[key].current.value, null); }
+    assert.equal(c.metrics.weight.current.value, 65); assert.equal(c.metrics.sleep.current.value, 7); assert.equal(c.exercise.strength.current.total, 30);
+    const achievements = A.achievement(rows, [], '2026-11-01', '2026-11-07')['ト']; for (const key of [...K.nutrients, 'overall']) assert.equal(achievements[key].valid, 0);
+  });
+  test('通常の部分入力は栄養素別の分母のみ有効・保管値は混入しない', () => {
+    const rows = [K.validateRecord({ date: '2026-11-02', dayType: 'ト', protein: 155 }), K.validateRecord({ date: '2026-11-03', dayType: 'ト', protein: 999, fat: 999, carbs: 999, pfcStatus: 'other' })];
+    assert.deepEqual(K.mean(rows, 'protein'), { value: 155, count: 1 });
+    const a = A.achievement(rows, [], '2026-11-01', '2026-11-07')['ト']; assert.equal(a.protein.rate, 100); assert.equal(a.protein.valid, 1); assert.equal(a.fat.valid, 0); assert.equal(a.overall.valid, 0);
+  });
+  test('計測不可・通常入力漏れ・記録なしを区別、70%分母は暦日', () => {
+    const rows = [K.validateRecord({ date: '2026-11-02', pfcStatus: 'eating_out' }), K.validateRecord({ date: '2026-11-03', pfcStatus: 'other' }), K.validateRecord({ date: '2026-11-04', protein: 155 }), K.validateRecord({ date: '2026-11-05', protein: 155, fat: 65, carbs: 280 })];
+    assert.deepEqual(A.pfcCounts(rows, '2026-11-01', '2026-11-07'), { expected: 7, recorded: 4, eatingOut: 1, other: 1, unavailable: 2, normalComplete: 1, normalIncomplete: 1, missing: 3 });
+    const s = A.stat(rows, 'protein', '2026-11-01', '2026-11-07'); assert.equal(s.expected, 7); assert.equal(s.count, 2); assert.equal(s.quality, '記録不足・参考値');
+  });
+  test('月曜朝の計測不可状態は前週日曜に入り今週0日は0件', () => {
+    const row = K.validateRecord({ date: '2026-11-02', pfcStatus: 'other' }), weeks = A.weekly([row], []);
+    assert.equal(weeks.at(-2).pfc.other, 1); assert.equal(weeks.at(-2).pfc.expected, 7); assert.equal(weeks.at(-1).pfc.other, 0); assert.equal(weeks.at(-1).pfc.expected, 0); assert.equal(weeks.at(-1).pfc.missing, 0);
+  });
+  test('月初・年初・閏日の計測不可状態は実施日に集計', () => {
+    for (const [date, previous] of [['2026-11-01', '2026-10-31'], ['2027-01-01', '2026-12-31'], ['2024-03-01', '2024-02-29']]) {
+      const row = K.validateRecord({ date, pfcStatus: 'eating_out' }); assert.equal(K.targetDate(row, 'pfcStatus'), previous);
+      assert.equal(A.pfcCounts([row], previous, previous).eatingOut, 1); assert.equal(A.pfcCounts([row], date, date).eatingOut, 0);
+      assert.equal(K.monthRange([row], previous.slice(0, 7), 'pfcStatus').length, 1);
+    }
+  });
+
   return passed;
 }
 module.exports = { runTests };

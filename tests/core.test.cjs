@@ -16,14 +16,45 @@ function runTests() {
   test('食事時刻は新入力・JSON・CSVに存在しない', () => { assert.throws(() => r(undefined, { breakfast: '07:00' })); for (const key of ['breakfast', 'lunch', 'dinner']) { assert.equal(K.fields.includes(key), false); assert.equal(K.backup([r()]).includes(key), false); } assert.equal(K.csv([r()]).includes('朝食'), false); });
   test('旧JSONは時刻を破棄し有酸素を推測せず保管', () => { const old = { ...r(), breakfast: '07:00', lunch: '12:00', dinner: '19:00', cardio: '散歩 20分', memo: '元のメモ' }; const parsed = K.parseBackup(JSON.stringify({ schemaVersion: 1, records: [old] })); assert.equal(parsed.records[0].cardio, null); assert.equal(parsed.records[0].weight, 65); assert.ok(parsed.records[0].memo.includes('散歩 20分')); assert.ok(parsed.warnings.length); assert.equal('breakfast' in parsed.records[0], false); });
   test('旧空欄運動も勝手に0にしない', () => { const parsed = K.parseBackup(JSON.stringify({ schemaVersion: 1, records: [{ date: '2026-11-02', weight: 65, strength: null, cardio: '' }] })); assert.equal(parsed.records[0].strength, null); assert.equal(parsed.records[0].cardio, null); });
-  test('不正JSON・形式・重複日付・不正な1件を含む全体を拒否', () => { for (const text of ['{broken', '{"schemaVersion":3,"records":[]}', K.backup([r(), r()]), K.backup([r(), { date: '2026-11-03', weight: -3 }])]) assert.throws(() => K.parseBackup(text)); });
+  test('不正JSON・形式・重複日付・不正な1件を含む全体を拒否', () => { for (const text of ['{broken', '{"schemaVersion":4,"records":[]}', K.backup([r(), r()]), K.backup([r(), { date: '2026-11-03', weight: -3 }])]) assert.throws(() => K.parseBackup(text)); });
   test('初期PFC目標の値', () => { assert.deepEqual(K.DEFAULT_TARGETS['ト'].protein, { min: 150, max: 160 }); assert.deepEqual(K.DEFAULT_TARGETS['へき'].carbs, { min: 200, max: 220 }); assert.deepEqual(K.DEFAULT_TARGETS['へき'], K.DEFAULT_TARGETS['きき']); });
   test('目標の下限超過・欠落・重複開始日を拒否', () => { const bad = JSON.parse(JSON.stringify(K.DEFAULT_TARGETS)); bad['ト'].protein = { min: 200, max: 150 }; assert.throws(() => K.validateTargets(bad)); assert.throws(() => K.validateHistory([{ effectiveFrom: '2026-11-01', targets: K.DEFAULT_TARGETS }, { effectiveFrom: '2026-11-01', targets: K.DEFAULT_TARGETS }])); assert.throws(() => K.parseBackup('{"schemaVersion":2,"records":[],"targetHistory":[{}]}')); });
   test('変更履歴のない過去には初期目標', () => { const changed = JSON.parse(JSON.stringify(K.DEFAULT_TARGETS)); changed['ト'].protein = { min: 100, max: 110 }; const history = K.validateHistory([{ effectiveFrom: '2026-11-01', targets: changed }]); assert.equal(K.targetsAt(history, '2026-10-31')['ト'].protein.min, 150); assert.equal(K.targetsAt(history, '2026-11-01')['ト'].protein.min, 100); });
-  test('新JSONの記録と目標履歴が往復一致', () => { const records = [r(undefined, { dayType: 'ト', cardio: 25, alcohol: 'なし', memo: '架空メモ' })]; const history = K.validateHistory([{ effectiveFrom: '2026-11-01', targets: K.DEFAULT_TARGETS }]); const parsed = K.parseBackup(K.backup(records, history)); assert.deepEqual(parsed.records, records); assert.deepEqual(parsed.targetHistory, history); assert.equal(parsed.sourceVersion, 2); });
+  test('新JSONの記録と目標履歴が往復一致', () => { const records = [r(undefined, { dayType: 'ト', cardio: 25, alcohol: 'なし', memo: '架空メモ' })]; const history = K.validateHistory([{ effectiveFrom: '2026-11-01', targets: K.DEFAULT_TARGETS }]); const parsed = K.parseBackup(K.backup(records, history)); assert.deepEqual(parsed.records, records); assert.deepEqual(parsed.targetHistory, history); assert.equal(parsed.sourceVersion, 3); });
   test('CSVのBOM・引用符・数式対策・運動分数', () => { const csv = K.csv([r(undefined, { cardio: 20, memo: '=1+1', alcohol: '架空,"飲料"\nなし' })]); assert.equal(csv.charCodeAt(0), 0xFEFF); assert.ok(csv.includes('有酸素運動(分)')); assert.ok(csv.includes('"\'=1+1"')); assert.ok(csv.includes('"架空,""飲料""\nなし"')); });
-  test('保存キーは従来どおり、版は2', () => { assert.equal(K.STORAGE_KEY, 'karada-log.records.v1'); assert.equal(K.SCHEMA_VERSION, 2); });
+  test('保存キーは従来どおり、版は3', () => { assert.equal(K.STORAGE_KEY, 'karada-log.records.v1'); assert.equal(K.SCHEMA_VERSION, 3); });
   test('編集・マージは他の日と元配列を変更しない', () => { const current = [r(), r('2026-11-03')]; const next = K.mergeRecords(current, [r(undefined, { weight: 66 })]); assert.equal(next[0].weight, 66); assert.equal(current[0].weight, 65); assert.equal(next[1].date, '2026-11-03'); });
+
+  test('形式1・2の計測状態なしは通常として読み込み、原文を変更しない', () => {
+    for (const version of [1, 2]) { const row = r(); delete row.pfcStatus; const text = JSON.stringify({ schemaVersion: version, records: [row], targetHistory: [] }), before = text;
+      assert.equal(K.parseBackup(text).records[0].pfcStatus, 'normal'); assert.equal(text, before);
+    }
+  });
+  test('形式3は計測状態必須・未知状態を拒否し全体復元しない', () => {
+    for (const value of ['', null, 1, {}, 'unknown', '__proto__', '<img onerror=alert(1)>']) assert.throws(() => r(undefined, { pfcStatus: value }));
+    const old = r(); delete old.pfcStatus; assert.throws(() => K.parseBackup(JSON.stringify({ schemaVersion: 3, records: [r('2026-11-01'), old], targetHistory: [] })));
+  });
+  test('計測不可の理由だけは保存可能・通常状態だけでは空記録を許可しない', () => {
+    assert.throws(() => K.validateRecord({ date: '2026-11-02', pfcStatus: 'normal' }));
+    for (const pfcStatus of ['eating_out', 'other']) assert.equal(K.validateRecord({ date: '2026-11-02', pfcStatus }).pfcStatus, pfcStatus);
+  });
+  test('計測不可の保管値も不正数値なら拒否', () => {
+    for (const protein of [-1, '155', NaN, Infinity, 2001]) assert.throws(() => r(undefined, { pfcStatus: 'other', protein }));
+  });
+  test('形式3は保管PFC・状態・目標履歴を往復維持', () => {
+    const rows = ['normal', 'eating_out', 'other'].map((pfcStatus, i) => r('2026-11-0' + (i + 1), { pfcStatus, protein: 155, fat: 65, carbs: 280 }));
+    const history = [{ effectiveFrom: '2026-11-01', targets: K.DEFAULT_TARGETS }];
+    const parsed = K.parseBackup(K.backup(rows, history)); assert.deepEqual(parsed.records, rows); assert.deepEqual(parsed.targetHistory, history); assert.equal(parsed.sourceVersion, 3);
+  });
+  test('CSVは状態列を追加し計測不可のPFCとカロリーのみ空欄', () => {
+    const rows = [r(undefined, { pfcStatus: 'eating_out', protein: 155, fat: 65, carbs: 280, sleep: 7, strength: 30 })];
+    const csv = K.csv(rows); assert.ok(csv.includes('PFC計測状態（前日）')); assert.ok(csv.includes('外食・飲み会'));
+    const values = csv.split('\r\n')[1].split(',').map(v => v.replace(/^"|"$/g, ''));
+    for (const key of K.nutrients) assert.equal(values[K.fields.indexOf(key)], '');
+    assert.equal(values.at(-1), ''); assert.equal(values[K.fields.indexOf('weight')], '65'); assert.equal(values[K.fields.indexOf('strength')], '30');
+    assert.equal(rows[0].protein, 155);
+  });
+
   return passed;
 }
 module.exports = { runTests };
